@@ -213,8 +213,16 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
     node.textContent = statusName(status);
   }
 
+  // Protect against older Workers that still return cached Guardian rows.
+  function isGuardianReview(thread) {
+    return String(thread.source || 'Codex').toLowerCase() === 'codex'
+      && (String(thread.title || '').trim().toLowerCase() === 'guardian review'
+        || String(thread.agent_label || '').trim().toLowerCase() === 'guardian');
+  }
+
   function filteredThreads() {
     return state.threads.filter(thread => {
+      if (isGuardianReview(thread)) return false;
       if (thread.parent_id && state.threads.some(t => t.id === thread.parent_id)) return false;
       const matchesStatus = filter === 'all' || statusOf(thread) === filter;
       const matchesSource = selectedSource === 'all' || (thread.source || 'Codex') === selectedSource;
@@ -322,7 +330,7 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
 
   function renderSources() {
     const select = $('source-filter');
-    const sources = [...new Set(state.threads.map(t => t.source || 'Codex'))].sort();
+    const sources = [...new Set(state.threads.filter(t => !isGuardianReview(t)).map(t => t.source || 'Codex'))].sort();
     if (selectedSource !== 'all' && !sources.includes(selectedSource)) selectedSource = 'all';
     const key = JSON.stringify(sources);
     if (select.dataset.sources !== key) {
@@ -336,7 +344,7 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
 
   function alignSelection() {
     const visible = filteredThreads();
-    if (!visible.some(thread => thread.id === selected) && !state.threads.some(thread => thread.id === selected && thread.parent_id)) selected = visible[0]?.id || null;
+    if (!visible.some(thread => thread.id === selected) && !state.threads.some(thread => thread.id === selected && thread.parent_id && !isGuardianReview(thread))) selected = visible[0]?.id || null;
     if (!mobile() && initialized) {
       const url = selected ? '#thread=' + encodeURIComponent(selected) : location.pathname + location.search;
       history.replaceState(null, '', url);
@@ -352,7 +360,7 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
     const focused = document.activeElement?.dataset.threadId;
     list.replaceChildren();
     if (!threads.length) {
-      list.append(element('div', 'empty', state.threads.length ? 'No matches' : 'No threads'));
+      list.append(element('div', 'empty', state.threads.some(t => !isGuardianReview(t)) ? 'No matches' : 'No threads'));
       return;
     }
     for (const thread of threads) {
@@ -458,7 +466,7 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
 
   function renderDetail() {
     const root = $('detail');
-    const thread = state.threads.find(entry => entry.id === selected);
+    const thread = state.threads.find(entry => entry.id === selected && !isGuardianReview(entry));
     if (!thread) {
       if (root.dataset.threadId !== 'empty') {
         root.replaceChildren(element('div', 'detail-empty', 'Select a thread'));
@@ -519,7 +527,7 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
       }
     }
 
-    const children = state.threads.filter(item => item.parent_id === thread.id);
+    const children = state.threads.filter(item => item.parent_id === thread.id && !isGuardianReview(item));
     const agents = root.querySelector('.agents');
     agents.hidden = !children.length;
     const agentList = agents.querySelector('.agent-list');
@@ -573,7 +581,7 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
   }
 
   function openThread(id) {
-    if (!state.threads.some(thread => thread.id === id)) return;
+    if (!state.threads.some(thread => thread.id === id && !isGuardianReview(thread))) return;
     const openingMobile = mobile();
     if (openingMobile && !document.body.classList.contains('detail-open')) listPosition = window.scrollY;
     selected = id;
@@ -600,7 +608,7 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
 
   function applyNavigation() {
     const id = hashThread();
-    if (id && state.threads.some(thread => thread.id === id)) {
+    if (id && state.threads.some(thread => thread.id === id && !isGuardianReview(thread))) {
       selected = id;
       document.body.classList.toggle('detail-open', mobile());
     } else {
@@ -616,7 +624,7 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
     if (!initialized) {
       initialized = true;
       const hashId = hashThread();
-      if (hashId && state.threads.some(thread => thread.id === hashId)) {
+      if (hashId && state.threads.some(thread => thread.id === hashId && !isGuardianReview(thread))) {
         selected = hashId;
         document.body.classList.toggle('detail-open', mobile());
       }
