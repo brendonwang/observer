@@ -114,7 +114,7 @@ Observer can now mirror the **recent, human-visible conversation** from Codex, C
 - Short previews of tool outputs and errors, rather than labels like "Using JS" or "Sleep"
 - Subagents accessible underneath their parent sessions
 
-This is a **read-only, bounded replay**, not remote access to your local application. Raw chain-of-thought, thinking blocks, image bytes, and arbitrary project files are not exported. Pi's active in-file branch is used instead of mixing in abandoned branches. Conversation extraction is intentionally limited to the most recent **48 blocks** and about **14,000 characters** per thread; old records may also fall outside the local JSONL read window. The UI explicitly marks truncated conversations.
+This is a **read-only, bounded replay**, not remote access to your local application. Raw chain-of-thought, thinking blocks, and image bytes are never exported. Observer doesn't directly crawl project files, but opted-in tool output previews can contain excerpts of those files. Pi's active in-file branch is used instead of mixing in abandoned branches. Conversation extraction is intentionally limited to the most recent **48 blocks** and about **14,000 characters** per thread; old records may also fall outside the local JSONL read window. The UI explicitly marks truncated conversations.
 
 **Existing installation:** After updating both `agent.py` and `conversation.py`, enable sharing without re-entering credentials:
 
