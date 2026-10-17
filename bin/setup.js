@@ -154,6 +154,7 @@ async function provision() {
   if(!database?.uuid) throw Error('Cloudflare did not return the D1 database identifier.');
   const wranglerConfig={
     name,main:'worker.js',compatibility_date:'2026-10-01',
+    triggers:{crons:['0 5 * * *']},
     d1_databases:[{binding:'DB',database_name:dbName,database_id:database.uuid}],
   };
   privateWrite(path.join(dir,'wrangler.json'),wranglerConfig);
