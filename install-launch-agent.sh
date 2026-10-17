@@ -27,7 +27,7 @@ ESCAPED_LOG=$("$PYTHON" -c 'import html,sys; print(html.escape(sys.argv[1]))' "$
 ESCAPED_ERR=$("$PYTHON" -c 'import html,sys; print(html.escape(sys.argv[1]))' "$HOME/.observer/agent-errors.log")
 cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList/1.0/PropertyList-1.0.dtd">
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>$LABEL</string>
 <key>ProgramArguments</key><array><string>$ESCAPED_PYTHON</string><string>$ESCAPED_AGENT</string><string>watch</string></array>
