@@ -25,6 +25,14 @@ async def preview_checks(browser):
     assert not await page.evaluate('document.documentElement.scrollWidth > innerWidth')
     assert 'Threads' in await page.locator('.main-head h1').inner_text()
     await page.screenshot(path=str(SHOT_DIR / 'observer-reviewed-mobile.png'))
+    await page.locator('button.thread').first.click()
+    assert await page.locator('.conv-message').count() >= 3
+    assert await page.locator('.conv-tools summary').count() >= 1
+    await page.locator('.conv-tools summary').first.click()
+    assert 'src/Dashboard.tsx' in await page.locator('.conv-steps').first.inner_text()
+    await page.screenshot(path=str(SHOT_DIR / 'observer-reviewed-conversation.png'))
+    await page.locator('.mobile-back').first.click()
+    await page.wait_for_timeout(150)
     await page.locator('button.thread').nth(1).click()
     assert await page.locator('.detail-title').inner_text() == 'Implement authentication flow'
     assert await page.locator('.list-panel').is_hidden()
@@ -33,7 +41,7 @@ async def preview_checks(browser):
     assert await page.locator('.disclosure').evaluate('(e) => e.open')
     assert not errors, errors
     await page.screenshot(path=str(SHOT_DIR / 'observer-reviewed-mobile-detail.png'))
-    await page.locator('.mobile-back').click()
+    await page.locator('.mobile-back:not(.parent-link)').click()
     await page.wait_for_timeout(150)
     assert await page.locator('.list-panel').is_visible()
     assert not errors, errors
@@ -103,7 +111,7 @@ async def hosted_checks(browser):
 
 async def main():
     async with async_playwright() as api:
-        browser = await api.chromium.launch(executable_path=CHROMIUM, headless=True, args=['--no-sandbox', '--disable-dev-shm-usage'])
+        browser = await api.chromium.launch(executable_path=CHROMIUM or None, headless=True, args=['--no-sandbox', '--disable-dev-shm-usage'])
         try:
             await preview_checks(browser)
             await hosted_checks(browser)
@@ -112,7 +120,7 @@ async def main():
             await browser.close()
 
 if __name__ == '__main__':
-    if not async_playwright or not CHROMIUM:
-        print('Playwright or Chromium unavailable; skipping browser tests')
+    if not async_playwright:
+        print('Playwright unavailable; skipping browser tests')
     else:
         asyncio.run(main())

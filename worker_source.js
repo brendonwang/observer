@@ -30,6 +30,11 @@ function fail(message, status = 400, extra = {}) {
 function clean(input, max = 300) {
   return typeof input === 'string' ? input.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, max) : '';
 }
+function cleanBody(input, max = 3500) {
+  return typeof input === 'string'
+    ? input.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').trim().slice(0, max)
+    : '';
+}
 function number(input, fallback = 0) {
   return typeof input === 'number' && Number.isFinite(input) ? Math.floor(input) : fallback;
 }
@@ -152,12 +157,40 @@ function isGuardianReview(input) {
   return String(input.title || '').trim().toLowerCase() === 'guardian review'
     || String(input.agent_label || '').trim().toLowerCase() === 'guardian';
 }
+const conversationRoles = new Set(['user', 'assistant', 'tool', 'notice']);
+function validateConversation(items, updated) {
+  if (!Array.isArray(items)) return undefined;
+  if (items.length > 50) return null;
+  let budget = 0;
+  const safe = [];
+  for (const raw of items) {
+    if (!raw || typeof raw !== 'object' || !conversationRoles.has(raw.role)) return null;
+    let at = number(raw.at, updated);
+    if (at < 946684800000 || at > Date.now() + 300_000) at = updated;
+    const item = {role: raw.role, at};
+    if (raw.role === 'tool') {
+      item.title = clean(raw.title, 150) || 'Tool';
+      item.detail = cleanBody(raw.detail, 1200);
+      item.output = cleanBody(raw.output, 1900);
+      item.error = raw.error === true;
+    } else {
+      item.text = cleanBody(raw.text, raw.role === 'assistant' ? 3600 : 2600);
+    }
+    budget += (item.text || '').length + (item.title || '').length +
+      (item.detail || '').length + (item.output || '').length + 80;
+    if (budget > 17000) return null;
+    safe.push(item);
+  }
+  return safe;
+}
 function validateThread(input, now) {
   if (!input || typeof input !== 'object' || !ID.test(input.id || '')) return null;
   const status = statuses.has(input.status) ? input.status : 'unknown';
   let updated = number(input.updated_at, now);
   if (updated > now + 300_000) updated = now;
   if (updated < 946684800000) updated = now; // Year 2000 minimum.
+  const conversation = validateConversation(input.conversation, updated);
+  if (conversation === null) return null;
   const events = Array.isArray(input.events) ? input.events.slice(-24).map(e => {
     const at = number(e && e.at, updated);
     return {
@@ -177,7 +210,10 @@ function validateThread(input, now) {
     updated_at: updated,
     started_at: number(input.started_at, updated),
     events,
-    final_response: clean(input.final_response, 6000),
+    final_response: cleanBody(input.final_response, 6000),
+    ...(conversation === undefined ? {} : {conversation,
+      conversation_truncated: input.conversation_truncated === true,
+      summary: cleanBody(input.summary, 160).replace(/\s+/g, ' ')}),
   };
 }
 async function sync(request, env) {
