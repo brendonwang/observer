@@ -141,6 +141,19 @@ def small_json(path: Path, max_bytes: int = 8192) -> dict:
         return {}
 
 
+def is_codex_guardian(meta: dict) -> bool:
+    """Identify internal Codex approval reviewers using explicit rollout metadata."""
+    if not isinstance(meta, dict):
+        return False
+    if meta.get("thread_source") == "guardian_review":
+        return True
+    source = meta.get("source")
+    if not isinstance(source, dict):
+        return False
+    subagent = source.get("subagent")
+    return isinstance(subagent, dict) and subagent.get("other") == "guardian"
+
+
 def codex_parent(meta: dict) -> str:
     """Prefer the rollout's explicit relationship; never infer from prompts."""
     parent = meta.get("parent_thread_id")
@@ -186,6 +199,8 @@ def parse_session(path: Path, titles: dict[str, str], content_mode: str = "metad
     metadata = first.get("payload", {}) if first.get("type") == "session_meta" else {}
     if not isinstance(metadata, dict):
         metadata = {}
+    if is_codex_guardian(metadata):
+        return None
     events = []
     cwd = metadata.get("cwd")
     project = cleaned(Path(cwd).name, 80) if isinstance(cwd, str) and cwd else "Unknown project"
@@ -245,6 +260,8 @@ def parse_session(path: Path, titles: dict[str, str], content_mode: str = "metad
                 if msg:
                     candidate_message = msg
                     events.append({"at": stamp, "kind": "message", "label": "Assistant response updated"})
+    if is_codex_guardian(metadata):
+        return None
     try:
         stat = path.stat()
     except OSError:
@@ -297,18 +314,28 @@ def gather_sessions(root: Path = SESSIONS_PATH, index: Path = INDEX_PATH,
         if match and path.stem.endswith(match.group()):
             indexed[match.group().lower()] = path
     chosen = {}
-    for _, path in paths[:max_sessions * 4]:
+    eligible = 0
+    for _, path in paths:
+        entry = first_record(path)
+        meta = entry.get("payload") if entry.get("type") == "session_meta" else None
+        if isinstance(meta, dict) and is_codex_guardian(meta):
+            continue  # Internal reviews must not displace real sessions.
+        eligible += 1
         cursor = path
         for _ in range(10):  # bounded ancestor walk
             if cursor in chosen:
                 break
-            chosen[cursor] = True
             entry = first_record(cursor)
             meta = entry.get("payload") if entry.get("type") == "session_meta" else None
+            if isinstance(meta, dict) and is_codex_guardian(meta):
+                break
+            chosen[cursor] = True
             parent = codex_parent(meta) if isinstance(meta, dict) else ""
             cursor = indexed.get(parent)
             if cursor is None:
                 break
+        if eligible >= max_sessions * 4:
+            break
     titles = load_titles(index)
     result = []
     for path in chosen:

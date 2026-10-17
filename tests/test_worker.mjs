@@ -20,7 +20,13 @@ class FakeDB {
       throw Error('Unexpected first: '+sql);
     },
     async all(){
-      if(sql.includes('LEFT JOIN previews'))return {results:[...db.threads.values()].sort((a,b)=>b.updated_at-a.updated_at).map(t=>({snapshot:t.snapshot,has_preview:db.previews.has(t.id)?1:0,preview_updated_at:db.previews.get(t.id)?.updated_at||0}))};
+      if(sql.includes('LEFT JOIN previews'))return {results:[...db.threads.values()].filter(t=>{
+        const snap=JSON.parse(t.snapshot);
+        return !(String(snap.source||'Codex').toLowerCase()==='codex' && (
+          String(t.title||'').trim().toLowerCase()==='guardian review' ||
+          String(snap.agent_label||'').trim().toLowerCase()==='guardian'
+        ));
+      }).sort((a,b)=>b.updated_at-a.updated_at).slice(0,40).map(t=>({snapshot:t.snapshot,has_preview:db.previews.has(t.id)?1:0,preview_updated_at:db.previews.get(t.id)?.updated_at||0}))};
       if(sql.includes('FROM devices'))return {results:[...db.devices.values()]};
       throw Error('Unexpected all: '+sql);
     },
@@ -88,6 +94,55 @@ test('unexpected D1 failures stay private with HTTP 500',async()=>{
   }),brokenEnv);
   assert.equal(response.status,500);
   assert.deepEqual(await response.json(),{error:'Internal server error'});
+});
+
+test('Guardian reviews are discarded at ingestion without suppressing real review workers',async()=>{
+  const working={id:'9b7de491-44c4-4979-8b1f-f2eacc612346',
+    source:'Codex', title:'Review authentication', project:'app',
+    agent_label:'reviewer', status:'working', updated_at:Date.now(), events:[]};
+  const guardian={...working,id:'9b7de491-44c4-4979-8b1f-f2eacc612347',
+    title:'Guardian review',agent_label:'guardian'};
+  const db=new FakeDB();
+  const localEnv={...env,DB:db};
+  const response=await worker.fetch(new Request(origin+'/api/agent/sync',{
+    method:'POST',
+    headers:{Authorization:'Bearer '+env.AGENT_TOKEN,'Content-Type':'application/json'},
+    body:JSON.stringify({protocol:1,device_id:'mac-123456789abc',threads:[guardian,working]}),
+  }),localEnv);
+  assert.equal(response.status,200);
+  assert.equal((await response.json()).accepted,1);
+  assert.ok(db.threads.has(working.id));
+  assert.equal(db.threads.has(guardian.id),false);
+});
+
+test('cached Guardians do not crowd older real sessions out of state',async()=>{
+  const database=new FakeDB();
+  const localEnv={...env,DB:database};
+  const now=Date.now();
+  for(let i=0;i<65;i++){
+    const id='guardian-'+String(i).padStart(8,'0');
+    const title='Guardian review';
+    const snapshot={id,source:'Codex',title,agent_label:'',updated_at:now+i};
+    database.threads.set(id,{id,title,updated_at:now+i,snapshot:JSON.stringify(snapshot)});
+  }
+  const legacy={id:'9b7de491-44c4-4979-8b1f-f2eacc612348',source:'Codex',
+    title:'Fix build pipeline',updated_at:now-50000};
+  database.threads.set(legacy.id,{...legacy,snapshot:JSON.stringify(legacy)});
+  const userReview={id:'9b7de491-44c4-4979-8b1f-f2eacc612349',source:'Custom',
+    title:'Guardian review',updated_at:now-60000};
+  database.threads.set(userReview.id,{...userReview,snapshot:JSON.stringify(userReview)});
+  const login=await worker.fetch(new Request(origin+'/api/login',{
+    method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},
+    body:JSON.stringify({password:env.VIEW_PASSWORD}),
+  }),localEnv);
+  assert.equal(login.status,200);
+  const cookie=login.headers.get('set-cookie').split(';')[0];
+  const response=await worker.fetch(new Request(origin+'/api/state',{
+    headers:{Cookie:cookie},
+  }),localEnv);
+  assert.equal(response.status,200);
+  const list=(await response.json()).threads;
+  assert.deepEqual(list.map(t=>t.id),[legacy.id,userReview.id]);
 });
 
 test('login CSRF protection, wrong password, cookie and private state',async()=>{
