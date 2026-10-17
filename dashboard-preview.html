@@ -113,6 +113,11 @@ button:active:not(:disabled) {transform: translateY(1px)}
 .events li {display: flex; align-items: baseline; justify-content: space-between; gap: 15px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); padding: 11px 0}
 .events time {flex: none; color: var(--quiet)}
 .events li span {overflow-wrap: anywhere}
+.back-link {border: 0; border-bottom: 1px solid var(--line); background: none; color: var(--muted); padding: 15px 0; font-size: 12px; width: 100%; text-align: left}
+.back-link:hover {color: var(--ink)}
+.subtask {width: 100%; display: flex; align-items: baseline; justify-content: space-between; gap: 15px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--ink); padding: 13px 0; text-align: left; font-size: 12px}
+.subtask:hover {background: var(--hover)}
+.subtask small {color: var(--muted); flex: none}
 
 .auth-screen {min-height: 100vh; display: flex; justify-content: center; align-items: center; padding: 35px 22px}
 .auth-card {width: 100%; max-width: 340px}
@@ -292,6 +297,15 @@ button:active:not(:disabled) {transform: translateY(1px)}
     if (source && item.source !== source) return false;
     return !query || [item.title, item.project, item.source].join(' ').toLowerCase().includes(query);
   }
+  function visibleActivities() {
+    return state.threads.filter(item => {
+      const title = String(item.title || '').trim().toLowerCase();
+      const label = String(item.agent_label || '').trim().toLowerCase();
+      if ((item.source || '').toLowerCase() === 'codex' &&
+          (title === 'guardian review' || label === 'guardian')) return false;
+      return !item.parent_id || !state.threads.some(parent => parent.id === item.parent_id);
+    });
+  }
   function grouped(items) {
     const groups = new Map();
     for (const item of items) {
@@ -309,11 +323,12 @@ button:active:not(:disabled) {transform: translateY(1px)}
     const live = online();
     $('connection').textContent = demo ? 'Demo' : live ? 'Connected' : state.devices.length ? 'Offline' : 'Waiting';
     $('status-dot').classList.toggle('off', !live);
-    $('running').textContent = state.threads.filter(t => status(t) === 'working').length;
-    $('completed').textContent = state.threads.filter(t => status(t) === 'completed').length;
-    $('attention').textContent = state.threads.filter(t => ['interrupted','failed'].includes(status(t))).length;
+    const activities = visibleActivities();
+    $('running').textContent = activities.filter(t => status(t) === 'working').length;
+    $('completed').textContent = activities.filter(t => status(t) === 'completed').length;
+    $('attention').textContent = activities.filter(t => ['interrupted','failed'].includes(status(t))).length;
     const select = $('source');
-    const names = [...new Set(state.threads.map(t => t.source).filter(Boolean))].sort();
+    const names = [...new Set(activities.map(t => t.source).filter(Boolean))].sort();
     if (select.dataset.key !== JSON.stringify(names)) {
       select.replaceChildren(new Option('All sources', ''));
       names.forEach(name => select.add(new Option(name, name)));
@@ -322,7 +337,7 @@ button:active:not(:disabled) {transform: translateY(1px)}
       source = select.value;
     }
     select.hidden = names.length < 2;
-    const matchesList = state.threads.filter(matches);
+    const matchesList = activities.filter(matches);
     const container = $('projects');
     container.replaceChildren();
     $('heading').textContent = view === 'projects' ? 'Projects' : 'Activity';
@@ -356,6 +371,13 @@ button:active:not(:disabled) {transform: translateY(1px)}
     $('dialog-meta').textContent = [item.project || 'Other', item.source || 'Custom', statusLabel(item), ago(item.updated_at)].join(' \u00b7 ');
     const content = $('detail-content');
     content.replaceChildren();
+    const parent = state.threads.find(t => t.id === item.parent_id);
+    if (parent) {
+      const back = el('button','back-link','Back to '+(parent.agent_label || parent.title || 'parent task'));
+      back.type='button';
+      back.addEventListener('click',()=>details(parent.id));
+      content.append(back);
+    }
     if (item.final_response) {
       content.append(el('div', 'result-title', 'Result'));
       content.append(el('div', 'output', item.final_response));
@@ -371,6 +393,20 @@ button:active:not(:disabled) {transform: translateY(1px)}
     }
     if (!events.length) list.append(el('li', '', 'No events recorded.'));
     content.append(list);
+    const children = state.threads.filter(child => child.parent_id === item.id &&
+      String(child.title || '').trim().toLowerCase() !== 'guardian review' &&
+      String(child.agent_label || '').trim().toLowerCase() !== 'guardian');
+    if (children.length) {
+      content.append(el('div','result-title','Subagents'));
+      for (const child of children) {
+        const row=el('button','subtask');
+        row.type='button';
+        row.append(el('span','',child.agent_label || child.title || 'Subagent'),
+                   el('small','',statusLabel(child)));
+        row.addEventListener('click',()=>details(child.id));
+        content.append(row);
+      }
+    }
     $('overlay').hidden = false;
     if (focusNode) $('close').focus();
   }
