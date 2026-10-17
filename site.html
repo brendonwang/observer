@@ -650,7 +650,7 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
     updateTime(time);
 
     renderConversation(thread);
-    root.querySelector('.result-section').hidden = Array.isArray(thread.conversation);
+    root.querySelector('.result-section').hidden = Array.isArray(thread.conversation) && thread.conversation.length > 0;
     const response = root.querySelector('.response');
     const heading = root.querySelector('.result-title');
     const latest = root.querySelector('.last-event');
