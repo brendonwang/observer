@@ -61,7 +61,7 @@ const escapeXML=value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt
 export function installRuntime() {
   findPython();
   fs.mkdirSync(RUNTIME,{recursive:true,mode:0o700});
-  for(const file of ['agent.py','service_adapter.py']) {
+  for(const file of ['agent.py','conversation.py','service_adapter.py']) {
     const src=path.join(PACKAGE_ROOT,file),dest=path.join(RUNTIME,file);
     if(!fs.existsSync(src)) throw Error('Package missing '+file+'. Reinstall Observer.');
     privateWrite(dest,fs.readFileSync(src,'utf8'));
@@ -196,10 +196,17 @@ export async function setup() {
   const sourcesInput=await question('Sources (comma-separated: codex,claude,pi,files,services): ','codex,claude,pi,files,services');
   const types=sourcesInput.split(',').map(s=>s.trim().toLowerCase());
   if(!types.length || new Set(types).size!==types.length || types.some(s=>!SOURCES.includes(s))) throw Error('Invalid source selection.');
-  const share=/^y(es)?$/i.test(await question('Share completed responses? [y/N]: ','n'));
+  console.log('Content sync defaults to metadata (titles, projects, status and events).');
+  console.log('Final mode sends completed answers; transcript mode sends prompts, commands and output previews.');
+  console.log('Transcript previews may include private file contents and secrets.');
+  const answer=(await question('Content mode: [m]etadata / [f]inal / [t]ranscript [m]: ','m')).toLowerCase();
+  if(!['m','f','t'].includes(answer)) throw Error('Choose m, f, or t.');
+  if(answer==='t' && await question('Type SYNC to enable conversation upload: ')!=='SYNC')
+    throw Error('Conversation upload not enabled.');
+  const contentMode=answer==='t'?'transcript':answer==='f'?'final':'metadata';
   const config={
     endpoint,agent_token:agentToken,device_id:prior?.device_id || 'mac-'+crypto.randomBytes(6).toString('hex'),
-    content_mode:share?'final':'metadata',screenshots_dir:prior?.screenshots_dir||'',
+    content_mode:contentMode,screenshots_dir:prior?.screenshots_dir||'',
     interval_seconds:30,max_sessions:20,
     sources:types.map(type=>priorSources.find(item=>(typeof item==='string'?item:item?.type)===type) || {type}),
   };
