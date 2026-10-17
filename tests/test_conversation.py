@@ -106,6 +106,10 @@ class TranscriptTests(unittest.TestCase):
         self.assertIn("fetch_file", title)
         self.assertIn("README.md", detail)
         self.assertEqual(conversation.tool_label("sleep", {"seconds": 2}), ("", ""))
+        log = conversation.Transcript()
+        log.tool("sleep", {"seconds": 2}, call_id="pause")
+        log.output("sleep complete", call_id="pause")
+        self.assertEqual(log.finish()[0], [])
 
     def test_bounded_output_and_custom_content(self):
         items = [{"role": "user", "text": "Prompt"},
