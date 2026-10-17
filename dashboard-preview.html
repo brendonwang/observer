@@ -119,6 +119,33 @@ button:active:not(:disabled) {transform: translateY(1px)}
 .subtask:hover {background: var(--hover)}
 .subtask small {color: var(--muted); flex: none}
 
+.conversation {display:flex;flex-direction:column;gap:22px}
+.conversation-head {display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:28px 0 18px}
+.conversation-head .result-title {margin:0}
+.conversation-note {font-size:11px;color:var(--muted)}
+.conv-message {min-width:0;overflow-wrap:anywhere}
+.conv-message.user {margin-left:20px;padding:15px 16px;background:#eef0ec;border:1px solid var(--line);border-radius:8px}
+.conv-message.assistant {padding:0 2px}
+.conv-byline {display:flex;align-items:baseline;justify-content:space-between;gap:12px;color:var(--muted);font-size:11px;margin-bottom:8px}
+.conv-byline strong {color:var(--ink);font-weight:650}
+.conv-content {color:#383c37;font-size:13px;line-height:1.8;overflow-wrap:anywhere}
+.conv-content .conv-text {white-space:pre-wrap}
+.conv-content code {font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;background:#edf0eb;border-radius:3px;padding:1px 3px}
+.conv-content pre,.conv-steps pre {background:#f1f2ef;border-radius:6px;color:#303a34;font:12px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace;margin:10px 0 0;padding:12px 13px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
+.conv-content pre code {padding:0;background:none}
+.conv-code-label {display:block;font-size:10px;letter-spacing:.04em;color:var(--muted);margin-bottom:6px}
+.conv-tools {border:1px solid var(--line);border-radius:7px;background:#f7f8f5;min-width:0}
+.conv-tools summary {list-style:none;cursor:pointer;padding:12px 14px;font-size:12px;color:var(--muted);display:flex;justify-content:space-between;align-items:center;gap:10px;overflow-wrap:anywhere}
+.conv-tools summary::-webkit-details-marker {display:none}
+.conv-tools summary::after {content:'Show';color:var(--green);font-size:11px;flex:none}
+.conv-tools[open] summary::after {content:'Hide'}
+.conv-steps {list-style:none;margin:0;padding:0 14px 8px}
+.conv-steps li {border-top:1px solid var(--line);padding:10px 0 12px}
+.conv-step-title {font-size:12px;color:var(--ink);font-weight:550;overflow-wrap:anywhere}
+.conv-step-error {color:var(--red)}
+.conv-steps pre {max-height:280px}
+.conv-notice {font-size:11px;color:var(--muted);text-align:center;border-top:1px solid var(--line);padding:12px 0 0}
+
 .auth-screen {min-height: 100vh; display: flex; justify-content: center; align-items: center; padding: 35px 22px}
 .auth-card {width: 100%; max-width: 340px}
 .auth-card .brand {display: block; margin-bottom: 54px}
@@ -234,7 +261,15 @@ button:active:not(:disabled) {transform: translateY(1px)}
   const now = Date.now(), minutes = n => now - n * 60_000;
   const demoState = {
     devices: [{id: 'demo', last_seen_at: now}], threads: [
-      {id: 'demo-agent', project: 'observer', source: 'Codex', title: 'Implement notifications', status: 'working', updated_at: minutes(4), events: [{kind: 'start', label: 'Agent started', at: minutes(4)}]},
+      {id: 'demo-agent', project: 'observer', source: 'Codex', title: 'Implement notifications', status: 'working', updated_at: minutes(4),
+        events: [{kind: 'start', label: 'Agent started', at: minutes(4)}],
+        conversation: [
+          {role:'user',text:'Implement a lightweight notification system. Show me the changes.',at:minutes(9)},
+          {role:'assistant',text:'I am adding completion and failure notifications with opt-in settings.',at:minutes(8)},
+          {role:'tool',title:'Read notification handlers',detail:'src/notifications.ts',output:'Located existing status callbacks.',at:minutes(7)},
+          {role:'tool',title:'Updated notification components',detail:'src/notifications.ts',output:'Added the notification event formatter.',at:minutes(6)},
+          {role:'assistant',text:'The event formatter is in place. I am running the tests now.',at:minutes(4)}
+        ]},
       {id: 'demo-test', project: 'observer', source: 'Terminal', title: 'npm test', status: 'completed', updated_at: minutes(8), final_response: '24 tests passed.', events: [{kind: 'complete', label: 'Tests passed', at: minutes(8)}]},
       {id: 'demo-server', project: 'observer', source: 'Service', title: 'Development server', status: 'completed', updated_at: minutes(1), final_response: 'localhost:3000 - healthy', events: []},
       {id: 'demo-ci', project: 'saco-judge', source: 'GitHub Actions', title: 'CI pipeline', status: 'interrupted', updated_at: minutes(12), events: [{kind: 'warning', label: 'CI failed', at: minutes(12)}]},
@@ -362,6 +397,109 @@ button:active:not(:disabled) {transform: translateY(1px)}
       container.append(section);
     }
   }
+
+  // Agent transcripts are untrusted text. Never evaluate returned content.
+  function appendRichInline(node, value) {
+    const segments=String(value||'').split(/(\*\*[^*\n]+\*\*|\x60[^\x60\n]+\x60|https:\/\/[^\s<>"']+)/g);
+    for(const segment of segments) {
+      if(!segment) continue;
+      if(segment.startsWith('**') && segment.endsWith('**')) {
+        node.append(el('strong','',segment.slice(2,-2)));
+      } else if(segment.startsWith(String.fromCharCode(96)) && segment.endsWith(String.fromCharCode(96))) {
+        node.append(el('code','',segment.slice(1,-1)));
+      } else if(/^https:\/\/[^\s<>"']+$/.test(segment)) {
+        try {
+          const link=el('a','',segment);
+          link.href=new URL(segment).href;
+          link.rel='noopener noreferrer';
+          link.target='_blank';
+          node.append(link);
+        } catch(_) {node.append(document.createTextNode(segment));}
+      } else {
+        node.append(document.createTextNode(segment));
+      }
+    }
+  }
+  function appendConversationText(node, value) {
+    const chunks=String(value||'').split(/(\x60{3}[^\n]*\n[\s\S]*?\x60{3})/g);
+    for(const chunk of chunks) {
+      if(!chunk) continue;
+      if(chunk.startsWith(String.fromCharCode(96).repeat(3))) {
+        const match=/^\x60{3}([^\n]*)\n([\s\S]*?)\x60{3}$/.exec(chunk);
+        if(match) {
+          const pre=el('pre');
+          if(match[1].trim()) pre.append(el('span','conv-code-label',match[1].trim().slice(0,30)));
+          pre.append(el('code','',match[2]));
+          node.append(pre);
+          continue;
+        }
+      }
+      const span=el('div','conv-text');
+      appendRichInline(span,chunk);
+      node.append(span);
+    }
+  }
+  function appendConversation(container, item) {
+    const entries=Array.isArray(item.conversation) ? item.conversation : null;
+    if(!entries) return false;
+    const title=el('div','conversation-head');
+    title.append(el('div','result-title','Conversation'));
+    if(item.conversation_truncated) title.append(el('span','conversation-note','Recent messages'));
+    container.append(title);
+    const feed=el('section','conversation');
+    feed.setAttribute('aria-label','Conversation');
+    if(!entries.length) feed.append(el('p','conv-notice','No conversation messages recorded yet.'));
+    let tools=[];
+    const flushTools=()=>{
+      if(!tools.length) return;
+      const groupItems=tools;
+      tools=[];
+      const group=el('details','conv-tools');
+      const first=groupItems.find(tool=>tool.title && tool.title!=='Tool output')?.title||'Tool activity';
+      group.append(el('summary','',groupItems.length===1 ? first : first+' · '+(groupItems.length-1)+' more'));
+      const list=el('ol','conv-steps');
+      for(const tool of groupItems) {
+        const row=el('li');
+        row.append(el('div',tool.error?'conv-step-title conv-step-error':'conv-step-title',tool.title||'Tool'));
+        if(tool.detail) {
+          const pre=el('pre','',tool.detail);
+          pre.setAttribute('aria-label','Tool input');
+          row.append(pre);
+        }
+        if(tool.output) {
+          const pre=el('pre','',tool.output);
+          pre.setAttribute('aria-label','Tool output');
+          row.append(pre);
+        }
+        list.append(row);
+      }
+      group.append(list);
+      feed.append(group);
+    };
+    for(const entry of entries) {
+      if(!entry || typeof entry!=='object') continue;
+      if(entry.role==='tool') {tools.push(entry);continue;}
+      flushTools();
+      if(entry.role==='notice') {feed.append(el('div','conv-notice',entry.text||'Activity'));continue;}
+      if(!['user','assistant'].includes(entry.role)) continue;
+      const article=el('article','conv-message '+entry.role);
+      const byline=el('div','conv-byline');
+      const date=new Date(Number(entry.at||0));
+      const time=Number(entry.at)>0 && Number.isFinite(date.getTime())
+        ? date.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}) : '';
+      byline.append(el('strong','',entry.role==='user'?'You':item.agent_label||item.source||'Assistant'),
+                    el('span','',time));
+      article.append(byline);
+      const body=el('div','conv-content');
+      appendConversationText(body,entry.text);
+      article.append(body);
+      feed.append(article);
+    }
+    flushTools();
+    container.append(feed);
+    return entries.length>0;
+  }
+
   function details(id, focusNode = null) {
     const item = state.threads.find(t => t.id === id);
     if (!item) return;
@@ -378,9 +516,12 @@ button:active:not(:disabled) {transform: translateY(1px)}
       back.addEventListener('click',()=>details(parent.id));
       content.append(back);
     }
-    if (item.final_response) {
+    const hasConversation=appendConversation(content,item);
+    if (!hasConversation && item.final_response) {
       content.append(el('div', 'result-title', 'Result'));
-      content.append(el('div', 'output', item.final_response));
+      const result=el('div','output');
+      appendConversationText(result,item.final_response);
+      content.append(result);
     }
     content.append(el('div', 'result-title', 'Activity'));
     const events = Array.isArray(item.events) ? item.events : [];
