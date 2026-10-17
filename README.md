@@ -2,7 +2,7 @@
 
 **See what your projects are doing, wherever you are.**
 
-Observer is a private, self-hosted dashboard for AI coding sessions and developer activity. It groups local agents, commands, and health checks by project, with a read-only mobile-first interface.
+Observer is a private, self-hosted dashboard for AI coding sessions and developer activity. It groups local agents, commands, and health checks by project, with a read-only mobile-first interface. Expanding a Codex, Claude Code, or Pi activity preserves the existing opt-in conversation replay with messages and collapsible tool steps.
 
 **Status: public beta in development.** The CLI is implemented in this repository; the npm package has **not been published or production-validated**. Use a feature branch or staging Cloudflare environment until the release checklist is complete.
 
@@ -49,7 +49,7 @@ Service checks use 3-second HEAD requests. Redirects and response bodies are not
 
 ## Privacy and hosting
 
-The Mac agent makes outbound HTTPS requests only. Metadata-only is the default. Titles, project names, timestamps, statuses, and event labels are still metadata and can be sensitive. Completed responses and approved screenshots require separate opt-in.
+The Mac agent makes outbound HTTPS requests only. Metadata-only is the default. Titles, project names, timestamps, statuses, and event labels are still metadata and can be sensitive. The setup wizard also offers **completed-response mode** or **conversation replay mode**. Conversation replay is a separate, explicit opt-in requiring the user to type `SYNC`; it can include prompts, assistant replies, command arguments, and truncated tool output previews containing private file contents or credentials. Screenshots are independently opt-in. Use metadata-only for sensitive projects.
 
 The website uses a separate viewer password and an agent-ingestion token. Both the Worker and the D1 database belong to the user's Cloudflare account. Stored data is **not end-to-end encrypted** against Cloudflare.
 
