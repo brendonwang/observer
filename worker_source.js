@@ -1,5 +1,5 @@
 /**
- * Codex Observer - Cloudflare Worker (no runtime packages).
+ * Observer - Cloudflare Worker (no runtime packages).
  * Build worker.js with: python3 build_worker.py
  * Cloudflare bindings: D1 database named DB; secrets AGENT_TOKEN,
  * VIEW_PASSWORD, SESSION_KEY. No commands, task creation, or filesystem writes.
@@ -161,8 +161,9 @@ function validateThread(input, now) {
   }) : [];
   return {
     id: input.id,
-    title: clean(input.title, 110) || 'Untitled Codex session',
+    title: clean(input.title, 110) || 'Untitled activity',
     project: clean(input.project, 80) || 'Unknown project',
+    source: clean(input.source, 40) || 'Codex',
     status,
     updated_at: updated,
     started_at: number(input.started_at, updated),
