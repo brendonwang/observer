@@ -4,7 +4,7 @@
 
 - [x] Keep original minimalist-ui palette, typography and mobile-first layout
 - [x] Project-centered workspace and activity feed
-- [x] Preserve Codex, Claude Code, Pi and custom JSON monitoring
+- [x] Preserve Codex, Claude Code, Pi and custom JSON monitoring, including opt-in conversation replay
 - [x] Opt-in tracked terminal commands and health endpoints
 - [x] CLI setup, Cloudflare provisioning foundation, local lifecycle management
 - [x] CI, packaging verification, security and contribution guidelines
