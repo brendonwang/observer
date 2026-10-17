@@ -145,6 +145,43 @@ test('cached Guardians do not crowd older real sessions out of state',async()=>{
   assert.deepEqual(list.map(t=>t.id),[legacy.id,userReview.id]);
 });
 
+test('transcript records preserve line breaks and reject oversize blocks',async()=>{
+  const id='9b7de491-44c4-4979-8b1f-f2eacc612355';
+  const one={role:'user',text:'Build a dashboard\nfor Codex',at:Date.now()};
+  const two={role:'tool',title:'Ran npm test',detail:'npm test',output:'Pass\n18 tests',at:Date.now()};
+  const payload={protocol:1,device_id:'mac-123456789abc',
+    threads:[{id,source:'Codex',title:'Build dashboard',project:'observer',
+      status:'working',updated_at:Date.now(),events:[],
+      conversation:[one,two],summary:'Testing dashboard',conversation_truncated:true}]};
+  const db=new FakeDB(), localEnv={...env,DB:db};
+  const sync=await worker.fetch(new Request(origin+'/api/agent/sync',{
+    method:'POST', headers:{Authorization:'Bearer '+env.AGENT_TOKEN,
+      'Content-Type':'application/json'},body:JSON.stringify(payload),
+  }),localEnv);
+  assert.equal(sync.status,200);
+  const row=JSON.parse(db.threads.get(id).snapshot);
+  assert.equal(row.conversation.length,2);
+  assert.equal(row.conversation[0].text,'Build a dashboard\nfor Codex');
+  assert.equal(row.conversation[1].output,'Pass\n18 tests');
+  assert.equal(row.conversation_truncated,true);
+  assert.equal(row.summary,'Testing dashboard');
+
+  payload.threads[0].conversation=[{role:'thinking',text:'hidden'}];
+  const bad=await worker.fetch(new Request(origin+'/api/agent/sync',{
+    method:'POST', headers:{Authorization:'Bearer '+env.AGENT_TOKEN,
+      'Content-Type':'application/json'},body:JSON.stringify(payload),
+  }),localEnv);
+  assert.equal(bad.status,400);
+  payload.threads[0].conversation=[{role:'assistant',text:'x'.repeat(20000)}];
+  const tooLong=await worker.fetch(new Request(origin+'/api/agent/sync',{
+    method:'POST', headers:{Authorization:'Bearer '+env.AGENT_TOKEN,
+      'Content-Type':'application/json'},body:JSON.stringify(payload),
+  }),localEnv);
+  // Individual blocks are bounded, never persisted unbounded.
+  assert.equal(tooLong.status,200);
+  assert.ok(JSON.parse(db.threads.get(id).snapshot).conversation[0].text.length<=3600);
+});
+
 test('login CSRF protection, wrong password, cookie and private state',async()=>{
   let res=await call('/api/login','POST',{password:env.VIEW_PASSWORD});
   assert.equal(res.status,403);
