@@ -164,6 +164,47 @@ class AgentTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             agent.read_config(config)
 
+    def test_codex_child_parent_metadata(self):
+        parent = '54f114f4-aaaa-4e12-8888-000000000002'
+        self.write_events(
+            self.row('session_meta', {'type': 'session_meta', 'cwd': '/tmp/observer',
+                'source': {'subagent': {'thread_spawn': {
+                    'parent_thread_id': parent, 'agent_nickname': 'reviewer'}}}}),
+            self.row('event_msg', {'type': 'task_started'}),
+        )
+        child = agent.gather_sessions(self.root, self.index)[0]
+        self.assertEqual(child['parent_id'], parent)
+        self.assertEqual(child['agent_label'], 'reviewer')
+
+    def test_pi_session_parse_and_privacy(self):
+        root = self.dir / 'pi'
+        root.mkdir()
+        header = {'type': 'session', 'id': THREAD_ID,
+                  'timestamp': '2026-10-16T21:09:00Z', 'cwd': '/tmp/website'}
+        path = root / ('2026-10-16_' + THREAD_ID + '.jsonl')
+        entries = [
+            header,
+            {'type': 'message', 'timestamp': '2026-10-16T21:09:01Z',
+             'message': {'role': 'user', 'content': 'PRIVATE USER INPUT'}},
+            {'type': 'message', 'timestamp': '2026-10-16T21:10:00Z',
+             'message': {'role': 'assistant', 'stopReason': 'stop', 'content': [
+                 {'type': 'thinking', 'thinking': 'PRIVATE REASONING'},
+                 {'type': 'toolCall', 'name': 'read', 'arguments': {'secret': 'PRIVATE TOOL ARG'}},
+                 {'type': 'text', 'text': 'Completed work'},
+             ]}},
+        ]
+        path.write_text('\n'.join(map(json.dumps, entries)) + '\n')
+        item = agent.gather_pi_sessions(root, content_mode='final')[0]
+        self.assertEqual(item['source'], 'Pi')
+        self.assertEqual(item['status'], 'completed')
+        self.assertEqual(item['final_response'], 'Completed work')
+        self.assertEqual(item['project'], 'website')
+        self.assertIn('Tool: read', str(item['events']))
+        self.assertNotIn('PRIVATE USER INPUT', json.dumps(item))
+        self.assertNotIn('PRIVATE REASONING', json.dumps(item))
+        self.assertNotIn('PRIVATE TOOL ARG', json.dumps(item))
+        self.assertEqual(agent.gather_pi_sessions(root)[0]['final_response'], '')
+
     def test_https_required(self):
         with self.assertRaises(ValueError):
             agent.validate_endpoint('http://example.com')
