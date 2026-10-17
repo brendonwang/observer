@@ -63,6 +63,33 @@ test('sync needs correct agent secret and creates no command endpoint',async()=>
   assert.equal((await call('/api/agent/commands','POST',{command:'rm'})).status,401);
 });
 
+test('missing D1 schema yields actionable 503 without leaking SQL errors',async()=>{
+  const db={prepare(){throw new Error('D1_ERROR: no such table: devices: SQLITE_ERROR');}};
+  const brokenEnv={...env,DB:db};
+  const payload={protocol:1,device_id:'mac-123456789abc',threads:[]};
+  const response=await worker.fetch(new Request(origin+'/api/agent/sync',{
+    method:'POST',
+    headers:{Authorization:'Bearer '+env.AGENT_TOKEN,'Content-Type':'application/json'},
+    body:JSON.stringify(payload),
+  }),brokenEnv);
+  assert.equal(response.status,503);
+  const body=await response.json();
+  assert.match(body.error,/schema\.sql/);
+  assert.doesNotMatch(body.error,/D1_ERROR|devices|SQLITE_ERROR/);
+});
+
+test('unexpected D1 failures stay private with HTTP 500',async()=>{
+  const db={prepare(){throw new Error('private underlying database exception');}};
+  const brokenEnv={...env,DB:db};
+  const response=await worker.fetch(new Request(origin+'/api/agent/sync',{
+    method:'POST',
+    headers:{Authorization:'Bearer '+env.AGENT_TOKEN,'Content-Type':'application/json'},
+    body:JSON.stringify({protocol:1,device_id:'mac-123456789abc',threads:[]}),
+  }),brokenEnv);
+  assert.equal(response.status,500);
+  assert.deepEqual(await response.json(),{error:'Internal server error'});
+});
+
 test('login CSRF protection, wrong password, cookie and private state',async()=>{
   let res=await call('/api/login','POST',{password:env.VIEW_PASSWORD});
   assert.equal(res.status,403);

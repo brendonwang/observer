@@ -273,9 +273,14 @@ export default {
       }
       return fail('Not found',404);
     } catch (error) {
-      // Avoid exposing D1/secret details in HTTP responses.
-      console.error('Observer request failed:',error && error.name || 'unknown');
-      return fail('Internal server error',500);
+      const detail = typeof error?.message === 'string' ? error.message.slice(0, 300) : '';
+      if (/no such table\s*:/i.test(detail)) {
+        console.error('Observer D1 schema missing; initialize the database bound as DB using schema.sql.');
+        return fail('Database setup incomplete. Run schema.sql in the D1 database bound as DB.', 503);
+      }
+      // Keep details in private Worker logs, never in the HTTP response.
+      console.error('Observer request failed:', request.method, path, error?.name || 'unknown', detail);
+      return fail('Internal server error', 500);
     }
   },
 };

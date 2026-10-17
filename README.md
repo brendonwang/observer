@@ -29,27 +29,42 @@ The upstream `minimalist-ui` skill is bundled locally under `.agents/skills/mini
 
 ## Deployment: Cloudflare dashboard, no command-line hosting tools
 
-1. Sign in to [Cloudflare Dashboard](https://dash.cloudflare.com/). Create a free Workers & Pages **Worker** called something like `observer` (use the starter / Hello World Worker, then **Edit Code**).
-2. Create a **D1 SQL database** called `observer-db`. In the database's **Console**, paste the entire contents of `schema.sql` and execute. Cloudflare officially supports both database creation and SQL Console from its dashboard.
-3. Return to your Worker. Under **Bindings**, add a **D1 database** binding. Set **Variable name exactly `DB`** and select `observer-db`.
-4. Generate **three different random secrets** in Ghostty on your Mac (nothing is installed):
+Complete these steps in order. **Creating a D1 database alone does not create Observer's tables.** Initialization and verification are required before syncing.
+
+1. **Create the Worker.** In the [Cloudflare Dashboard](https://dash.cloudflare.com/), go to **Workers & Pages** and create a Worker named, for example, `observer`. You can start with the default Hello World code.
+2. **Create the database.** Under **Storage & databases → D1**, create a database named `observer-db`.
+3. **Initialize the database (required).** Open **D1 → observer-db → Console**. Copy the **entire contents** of [`schema.sql`](schema.sql) into the SQL console and execute it. This creates the `devices`, `threads`, `previews`, and `login_attempts` tables. Running the script again is safe (`CREATE TABLE IF NOT EXISTS`).
+4. **Verify initialization (required).** In the **same database's SQL console**, run:
+
+   ```sql
+   SELECT name
+   FROM sqlite_master
+   WHERE type = 'table'
+     AND name IN ('devices', 'threads', 'previews', 'login_attempts')
+   ORDER BY name;
+   ```
+
+   You must see **four rows**: `devices`, `login_attempts`, `previews`, and `threads`. If one is missing, rerun `schema.sql` and check again. Do not continue until all four exist.
+5. **Bind the database.** Return to the Worker → **Settings → Bindings**. Add a **D1 database** binding whose **variable name is exactly `DB`**, pointing to the **same database you just initialized** (`observer-db`). A similarly named but different database will not work.
+6. **Create three different secrets.** On your Mac, generate them locally:
 
    ```bash
    python3 - <<'PY'
    import secrets
-   for name in ('VIEW_PASSWORD','AGENT_TOKEN','SESSION_KEY'):
+   for name in ('VIEW_PASSWORD', 'AGENT_TOKEN', 'SESSION_KEY'):
        print(f'{name}={secrets.token_urlsafe(40)}')
    PY
    ```
 
-   Save these **privately** (do not paste them into chat, GitHub, screenshots, or your source code). In your Worker's **Settings / Variables and Secrets**, add three **Secret** bindings with those exact names and values. Use the generated `VIEW_PASSWORD` as the dashboard login password. These are three *different* values, not aliases of one token.
-5. In the Worker's **Edit Code** screen, replace the starter code with all of `worker.js`, then **Save and Deploy**. If you change the design later, edit `site.html` and/or `worker_source.js`, run `python3 build_worker.py`, and redeploy the regenerated `worker.js`.
-6. Visit your generated `https://<your-worker>.<your-subdomain>.workers.dev` URL on any browser. You should see the password login, then an empty dashboard waiting for your Mac.
+   In the Worker's **Settings → Variables and Secrets**, add the generated values as **Secret** bindings named exactly `VIEW_PASSWORD`, `AGENT_TOKEN`, and `SESSION_KEY`. Never commit or paste their values into chat. Use `VIEW_PASSWORD` to log into the website and `AGENT_TOKEN` to authenticate the local agent; these are not interchangeable.
+7. **Deploy the Worker.** In **Edit Code**, replace the starter code with the entire contents of `worker.js`, then **Save and Deploy**. When modifying `worker_source.js` or `site.html` later, run `python3 build_worker.py` and deploy the regenerated `worker.js`.
+8. **Check the website.** Visit `https://<your-worker>.<your-subdomain>.workers.dev`. The password screen should appear. Sign in with `VIEW_PASSWORD`. An empty dashboard is normal until you connect the Mac agent.
 
-If your Worker returns "Server is missing its required configuration," verify the four bindings: `DB` (D1 database), `AGENT_TOKEN` (secret), `VIEW_PASSWORD` (secret), `SESSION_KEY` (secret). Binding names are case-sensitive. Cloudflare may require a new deployment after binding changes.
+**Next:** Complete **Run the Mac agent** below, especially `python3 agent.py once` before starting continuous monitoring. You do not need Wrangler or extra hosting software.
 
-**Hosted service requirements:** a Cloudflare account and a Mac with Python 3.9+ (often already installed through development tools). There is no public deployed URL included in this package; only you can link the dashboard to your Cloudflare account.
+If the Worker reports **"Server is missing its required configuration"**, check `DB`, `AGENT_TOKEN`, `VIEW_PASSWORD`, and `SESSION_KEY` for correct names and values, and redeploy after changing bindings. See **Troubleshooting** for database errors.
 
+**Hosted service requirements:** A Cloudflare account and a Mac with Python 3.9+. The repository cannot deploy the Worker or provision your Cloudflare resources for you.
 
 ## Monitoring sources
 
@@ -88,12 +103,14 @@ Existing installations using `~/.codex-monitor/config.json` continue to work wit
 
 ## Run the Mac agent
 
-1. Copy `agent.py` to any folder on your Mac. In Ghostty, `cd` to that folder.
+1. Clone or update this repository on your Mac, and open it in your terminal. Use the same version of `agent.py` as the deployed `worker.js`.
 2. Choose your sources: Codex (`~/.codex/sessions`), Claude Code (`~/.claude/projects`), or JSON snapshot files (`~/.observer/feeds`). Missing sources simply produce no activity.
-3. Run `python3 agent.py init`. Paste your Worker URL and **AGENT_TOKEN** when prompted. The token input is hidden.
-4. The setup asks whether you want to share final assistant responses. The default is **No (metadata only)**. Answer `y` to show final responses on the website. You can also provide a **dedicated, approved** screenshot directory (see below).
-5. Start monitoring with `python3 agent.py watch`. Leave it running when you want near-live progress; the dashboard refreshes about every 12 seconds and the Mac reports about every 30 seconds.
-6. On your phone, visit the same HTTPS Worker URL and log in with **VIEW_PASSWORD**. Bookmark it or add it to your home screen using your browser's built-in feature (optional).
+3. Run `python3 agent.py init`. Enter your deployed Worker URL and the **`AGENT_TOKEN` secret** when prompted (not `VIEW_PASSWORD`).
+4. Select whether to share completed responses; **metadata only** is the default. You may also select an approved screenshots folder.
+5. **Verify syncing first:** Run `python3 agent.py once`. A successful test prints `Synced N threads`, including when `N` is zero. An HTTP error means setup is incomplete; see **Troubleshooting**. Do not proceed to continuous monitoring until this succeeds.
+6. Start monitoring with `python3 agent.py watch`. The agent checks for changes about every 30 seconds; the dashboard refreshes about every 12 seconds.
+7. On your phone, visit the same HTTPS Worker URL and sign in with **`VIEW_PASSWORD`**.
+
 
 The local agent config lives at `~/.observer/config.json` with owner-only (`0600`) permissions. Keep your token private. Your Mac can sleep; the website will then show the last synced snapshot and indicate that the Mac is offline. It cannot see new changes until the Mac reconnects.
 
@@ -151,7 +168,9 @@ This prints exactly what *would* be sent but **does not make any network request
 
 **Preview not appearing**: Verify screenshot name matches the session UUID, file is in the explicitly selected approved directory, image is smaller than 512 KiB, and format is PNG/JPEG/WebP. Some session files may have a different ID naming convention.
 
-**Cloudflare Worker 500**: Check that D1 binding is named `DB` and that `schema.sql` was executed. See the Worker's Cloudflare Logs for server errors; the API intentionally does not reveal internal errors to clients.
+**HTTP 503 — database setup incomplete**: The Worker detected a missing D1 table. Open **D1 → your database → Console**, run the four-table verification query in step 4 above, execute `schema.sql` if needed, and confirm the Worker's `DB` binding points to **that exact database**. If the response says required configuration is missing, verify the binding and the three secrets instead.
+
+**HTTP 500 — internal Worker error**: Open **Workers & Pages → your Worker → Logs → Live**, run `python3 agent.py once` again, and check the logged error name and message. The HTTP response deliberately omits internal database details. Do not share credentials or raw session data from logs.
 
 **New Codex Desktop build breaks parsing**: Run `python3 agent.py dry-run`, inspect whether session file locations / event types changed, and update `parse_session()` deliberately. We haven't verified this against your own Mac's Codex log samples.
 
@@ -179,4 +198,4 @@ Node and Playwright are only used for testing. The tests do not prove production
 
 ## Remove / revoke
 
-Stop the agent (Ctrl+C or `launchctl bootout`). Delete `~/.codex-monitor/config.json` if you no longer want the saved ingestion token. In Cloudflare, rotate/delete the `AGENT_TOKEN`, `VIEW_PASSWORD`, and `SESSION_KEY` secrets, then remove the Worker and D1 database if you want to stop hosting and remove its persisted session records. Deleting the screenshot folder or source files on your Mac **does not** automatically remove previously uploaded content from D1.
+Stop the agent (Ctrl+C or `launchctl bootout`). Delete `~/.observer/config.json` (or the legacy `~/.codex-monitor/config.json`) if you no longer want the saved ingestion token. In Cloudflare, rotate/delete the `AGENT_TOKEN`, `VIEW_PASSWORD`, and `SESSION_KEY` secrets, then remove the Worker and D1 database if you want to stop hosting and remove its persisted session records. Deleting the screenshot folder or source files on your Mac **does not** automatically remove previously uploaded content from D1.
