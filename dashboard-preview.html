@@ -43,6 +43,7 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
 .thread:hover{background:var(--hover)}.thread.selected{background:var(--selected)}.thread.selected:before{content:"";position:absolute;left:0;top:16px;bottom:16px;width:2px;background:var(--green)}
 .thread-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
 .thread-title{font-weight:630;font-size:14px;letter-spacing:-.02em;line-height:1.4;overflow-wrap:anywhere}
+.thread-snippet{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;color:var(--muted);font-size:12px;line-height:1.55;margin-top:7px;max-width:98%}
 .thread-meta{display:flex;gap:8px;align-items:center;min-width:0;font-size:12px;color:var(--muted);margin-top:9px}
 .project{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:64%}
 .status{font-size:11px;font-weight:550;color:var(--muted);white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
@@ -56,6 +57,31 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
 .section h3{font-size:13px;letter-spacing:-.01em;font-weight:650;margin:0 0 17px}
 .response{white-space:pre-wrap;overflow-wrap:anywhere;max-height:560px;overflow:auto;font-size:13px;line-height:1.85;color:#454943}
 .response a{color:#2a6b4b}.muted{color:var(--muted)}
+.conversation-section{padding-top:26px}
+.conversation-header{display:flex;justify-content:space-between;align-items:baseline;gap:16px}
+.conversation-note{font-size:11px;color:var(--muted)}
+.conversation-feed{display:flex;flex-direction:column;gap:20px}
+.conv-message{max-width:100%;min-width:0}
+.conv-message.user{background:#eef0ec;border:1px solid #e6e9e3;border-radius:11px;padding:15px 17px;margin-left:clamp(8px,8%,48px)}
+.conv-message.assistant{padding:0 2px}
+.conv-byline{display:flex;align-items:baseline;justify-content:space-between;gap:12px;color:var(--muted);font-size:11px;margin-bottom:7px}
+.conv-byline strong{font-weight:650;color:var(--ink)}
+.conv-content{color:#383c37;overflow-wrap:anywhere;font-size:13px;line-height:1.8}
+.conv-text{white-space:pre-wrap}
+.conv-content pre,.conv-steps pre{margin:10px 0 12px;padding:12px 13px;border-radius:6px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:#f1f2ef;color:#303a34;font:12px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace}
+.conv-code-label{display:block;font-size:10px;letter-spacing:.04em;color:var(--muted);margin-bottom:6px}
+.conv-tools{border:1px solid var(--line);border-radius:7px;background:#f7f8f5}
+.conv-tools summary{list-style:none;cursor:pointer;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:14px;font-size:12px;color:var(--muted)}
+.conv-tools summary::-webkit-details-marker{display:none}
+.conv-tools summary:after{content:"Show";color:var(--green);font-size:11px}
+.conv-tools[open] summary:after{content:"Hide"}
+.conv-steps{list-style:none;margin:0;padding:0 14px 8px}
+.conv-steps li{padding:10px 0 12px;border-top:1px solid var(--line)}
+.conv-step-title{font-size:12px;font-weight:550;overflow-wrap:anywhere;color:var(--ink)}
+.conv-steps pre{margin:9px 0 0;max-height:280px}
+.conv-step-error{color:var(--red)}
+.conv-notice{font-size:11px;text-align:center;color:var(--muted);border-top:1px solid var(--line);padding-top:12px}
+
 .last-event{font-size:13px;line-height:1.65;color:var(--muted)}
 .last-event strong{color:var(--ink);font-weight:550}
 .preview{display:block;max-width:100%;width:auto;max-height:440px;object-fit:contain;border:1px solid var(--line);border-radius:5px;background:#fff}
@@ -298,9 +324,20 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
     return {
       devices: [{id: 'demo', last_seen_at: Date.now() - 9000}],
       threads: [
-        {id: '3b9aa460-78e9-4e8f-a693-fd91d0000001', title: 'Redesign the developer dashboard', project: 'frontend-app', status: 'working', updated_at: t(17), events: [{at: t(238), kind: 'start', label: 'Turn started'}, {at: t(145), kind: 'tool', label: 'Tool: shell_command'}, {at: t(63), kind: 'message', label: 'Assistant response updated'}, {at: t(17), kind: 'tool', label: 'Tool: apply_patch'}], final_response: '', has_preview: false},
+        {id: '3b9aa460-78e9-4e8f-a693-fd91d0000001', source: 'Codex', title: 'Redesign the developer dashboard', project: 'frontend-app', status: 'working', updated_at: t(17), summary: 'Updated the dashboard layout and now running checks.', conversation_truncated: false, conversation: [
+          {role:'user', text:'Redesign our developer dashboard. Make the layout cleaner and mobile-friendly, then run the tests.', at:t(238)},
+          {role:'assistant', text:'I’ll simplify the navigation and reorganize the main workspace around the active project.', at:t(210)},
+          {role:'tool', title:'Read src/Dashboard.tsx', detail:'src/Dashboard.tsx', output:'export function Dashboard() { /* existing layout */ }', at:t(145)},
+          {role:'tool', title:'Edited src/Dashboard.tsx', detail:'Replaced the sidebar and introduced a responsive grid.', output:'Updated 1 file', at:t(94)},
+          {role:'assistant', text:'The new layout is in place. I’m checking the build and small-screen behavior.', at:t(63)},
+          {role:'tool', title:'Ran npm test', detail:'npm test', output:'18 passing', at:t(17)}
+        ], events: [{at: t(238), kind: 'start', label: 'Turn started'}, {at: t(145), kind: 'tool', label: 'Tool: shell_command'}, {at: t(63), kind: 'message', label: 'Assistant response updated'}, {at: t(17), kind: 'tool', label: 'Tool: apply_patch'}], final_response: '', has_preview: false},
         {id: '3b9aa460-78e9-4e8f-a693-fd91d0000002', source: 'Claude Code', title: 'Implement authentication flow', project: 'api-service', status: 'completed', updated_at: t(1020), events: [{at: t(1470), kind: 'tool', label: 'Tool: apply_patch'}, {at: t(1030), kind: 'message', label: 'Assistant responded'}, {at: t(1020), kind: 'complete', label: 'Turn completed'}], final_response: 'Implemented authentication and session handling.\n\nAll 12 tests passed.\n\nhttps://example.com', has_preview: false},
-        {id: '3b9aa460-78e9-4e8f-a693-fd91d0000003', title: 'Optimize model inference', project: 'knee-mri', status: 'quiet', updated_at: t(385), events: [{at: t(425), kind: 'start', label: 'Turn started'}, {at: t(385), kind: 'tool', label: 'Tool: shell_command'}], final_response: '', has_preview: false},
+        {id: '3b9aa460-78e9-4e8f-a693-fd91d0000003', source: 'Pi', title: 'Optimize model inference', project: 'knee-mri', status: 'quiet', updated_at: t(385), summary: 'Tracing the slow inference path and comparing approaches.', conversation_truncated: true, conversation: [
+          {role:'user', text:'Find the performance bottleneck in inference and reduce memory usage.', at:t(920)},
+          {role:'assistant', text:'The largest allocation occurs in preprocessing. I’m testing a streamed batch path.', at:t(740)},
+          {role:'tool', title:'Ran python benchmark.py', detail:'python benchmark.py --batch-size 8', output:'Median latency 194ms', at:t(510)}
+        ], events: [{at: t(425), kind: 'start', label: 'Turn started'}, {at: t(385), kind: 'tool', label: 'Tool: shell_command'}], final_response: '', has_preview: false},
         {id: '3b9aa460-78e9-4e8f-a693-fd91d0000004', source: 'Custom', title: 'Fix persistent segment tree edge case', project: 'cp-solutions', status: 'completed', updated_at: t(20000), events: [{at: t(20000), kind: 'complete', label: 'Turn completed'}], final_response: 'Fixed the empty-range query. Tests pass.', has_preview: false},
       ],
     };
@@ -353,7 +390,7 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
 
   function renderList() {
     const threads = filteredThreads();
-    const key = JSON.stringify([threads.map(thread => [thread.id, thread.title, thread.project, thread.source, thread.updated_at, statusOf(thread)]), selected, filter, term, selectedSource]);
+    const key = JSON.stringify([threads.map(thread => [thread.id, thread.title, thread.project, thread.source, thread.summary, thread.updated_at, statusOf(thread)]), selected, filter, term, selectedSource]);
     if (listKey === key) return;
     listKey = key;
     const list = $('session-list');
@@ -372,13 +409,16 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
       const badge = element('span');
       setStatus(badge, statusOf(thread));
       header.append(element('span', 'thread-title', thread.title), badge);
+      const snippet = thread.summary ? element('div', 'thread-snippet', thread.summary) : null;
       const meta = element('div', 'thread-meta');
       if (thread.project && thread.project !== 'Unknown project') {
         meta.append(element('span', 'project', thread.project), element('span', '', '\u00b7'));
       }
       if (thread.source) meta.append(element('span', '', thread.source), element('span', '', '\u00b7'));
       meta.append(when(thread.updated_at));
-      button.append(header, meta);
+      button.append(header);
+      if (snippet) button.append(snippet);
+      button.append(meta);
       button.addEventListener('click', () => openThread(thread.id));
       list.append(button);
     }
@@ -412,6 +452,13 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
     parentLink.hidden = true;
     parentLink.addEventListener('click', () => { const parent = state.threads.find(t => t.id === thread.parent_id); if (parent) openThread(parent.id); });
     root.append(parentLink);
+
+    const conversation = element('section', 'section conversation-section');
+    const conversationHead = element('div', 'conversation-header');
+    conversationHead.append(element('h3', '', 'Conversation'), element('span', 'conversation-note'));
+    conversation.append(conversationHead, element('div', 'conversation-feed'));
+    conversation.hidden = true;
+    root.append(conversation);
 
     const result = element('section', 'section result-section');
     result.append(element('h3', 'result-title', 'Result'), element('div', 'response'), element('div', 'last-event'));
@@ -464,6 +511,104 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
     root.append(details);
   }
 
+
+  function appendConversationText(node, value) {
+    // Render fenced code using text nodes only; never evaluate session content.
+    const chunks = String(value || '').split(/(\x60{3}[^\n]*\n[\s\S]*?\x60{3})/g);
+    for (const chunk of chunks) {
+      if (!chunk) continue;
+      if (chunk.startsWith(String.fromCharCode(96).repeat(3))) {
+        const match = /^\x60{3}([^\n]*)\n([\s\S]*?)\x60{3}$/.exec(chunk);
+        if (match) {
+          const pre = element('pre');
+          if (match[1].trim()) pre.append(element('span', 'conv-code-label', match[1].trim().slice(0, 30)));
+          pre.append(element('code', '', match[2]));
+          node.append(pre);
+          continue;
+        }
+      }
+      const span = element('div', 'conv-text');
+      appendLinks(span, chunk);
+      node.append(span);
+    }
+  }
+
+  function renderConversation(thread) {
+    const section = $('detail').querySelector('.conversation-section');
+    const feed = section.querySelector('.conversation-feed');
+    if (!Array.isArray(thread.conversation)) {
+      section.hidden = true;
+      feed.dataset.key = '';
+      return;
+    }
+    section.hidden = false;
+    const data = thread.conversation;
+    const note = section.querySelector('.conversation-note');
+    note.textContent = thread.conversation_truncated ? 'Recent messages' : '';
+    const key = JSON.stringify(data);
+    if (feed.dataset.key === key) return;
+    const previouslyOpen = [...feed.querySelectorAll('.conv-tools')].map((item, i) => item.open ? i : -1);
+    feed.dataset.key = key;
+    feed.replaceChildren();
+    if (!data.length) {
+      feed.append(element('p', 'muted', 'No conversation messages recorded yet.'));
+      return;
+    }
+    let toolGroup = [];
+    let groupIndex = 0;
+    const flushTools = () => {
+      if (!toolGroup.length) return;
+      const tools = toolGroup;
+      toolGroup = [];
+      const details = element('details', 'conv-tools');
+      const title = tools.length === 1 ? tools[0].title || 'Tool action' : tools.length + ' tool actions';
+      const summary = element('summary', '', title);
+      details.append(summary);
+      const list = element('ol', 'conv-steps');
+      for (const tool of tools) {
+        const item = element('li');
+        item.append(element('div', 'conv-step-title' + (tool.error ? ' conv-step-error' : ''), tool.title || 'Tool'));
+        if (tool.detail) {
+          const command = element('pre', '', tool.detail);
+          command.setAttribute('aria-label', 'Tool input');
+          item.append(command);
+        }
+        if (tool.output) {
+          const out = element('pre', '', tool.output);
+          out.setAttribute('aria-label', 'Tool output');
+          item.append(out);
+        }
+        list.append(item);
+      }
+      details.append(list);
+      details.open = previouslyOpen.includes(groupIndex);
+      groupIndex++;
+      feed.append(details);
+    };
+    for (const entry of data) {
+      if (entry.role === 'tool') {
+        toolGroup.push(entry);
+        continue;
+      }
+      flushTools();
+      if (entry.role === 'notice') {
+        feed.append(element('div', 'conv-notice', entry.text || 'Activity'));
+        continue;
+      }
+      if (!['user', 'assistant'].includes(entry.role)) continue;
+      const item = element('article', 'conv-message ' + entry.role);
+      const speaker = entry.role === 'user' ? 'You' : thread.agent_label || thread.source || 'Assistant';
+      const byline = element('div', 'conv-byline');
+      byline.append(element('strong', '', speaker), element('span', '', clockTime(entry.at)));
+      item.append(byline);
+      const body = element('div', 'conv-content');
+      appendConversationText(body, entry.text);
+      item.append(body);
+      feed.append(item);
+    }
+    flushTools();
+  }
+
   function renderDetail() {
     const root = $('detail');
     const thread = state.threads.find(entry => entry.id === selected && !isGuardianReview(entry));
@@ -489,6 +634,8 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
     time.dataset.ms = String(thread.updated_at || 0);
     updateTime(time);
 
+    renderConversation(thread);
+    root.querySelector('.result-section').hidden = Array.isArray(thread.conversation);
     const response = root.querySelector('.response');
     const heading = root.querySelector('.result-title');
     const latest = root.querySelector('.last-event');
