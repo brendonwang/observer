@@ -68,6 +68,8 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
 .conv-byline strong{font-weight:650;color:var(--ink)}
 .conv-content{color:#383c37;overflow-wrap:anywhere;font-size:13px;line-height:1.8}
 .conv-text{white-space:pre-wrap}
+.conv-text code{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;background:#edf0eb;border-radius:3px;padding:1px 3px}
+.parent-link{display:inline-flex;align-items:center;margin:14px 0 0;padding:0;border:0;background:none;color:var(--green);font-size:12px}
 .conv-content pre,.conv-steps pre{margin:10px 0 12px;padding:12px 13px;border-radius:6px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:#f1f2ef;color:#303a34;font:12px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace}
 .conv-code-label{display:block;font-size:10px;letter-spacing:.04em;color:var(--muted);margin-bottom:6px}
 .conv-tools{border:1px solid var(--line);border-radius:7px;background:#f7f8f5}
@@ -512,6 +514,18 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
   }
 
 
+  function appendRichInline(node, value) {
+    const segments = String(value).split(/(\*\*[^*\n]+\*\*|\x60[^\x60\n]+\x60)/g);
+    for (const segment of segments) {
+      if (!segment) continue;
+      if (segment.startsWith('**') && segment.endsWith('**')) {
+        node.append(element('strong', '', segment.slice(2, -2)));
+      } else if (segment.startsWith(String.fromCharCode(96)) && segment.endsWith(String.fromCharCode(96))) {
+        node.append(element('code', '', segment.slice(1, -1)));
+      } else appendLinks(node, segment);
+    }
+  }
+
   function appendConversationText(node, value) {
     // Render fenced code using text nodes only; never evaluate session content.
     const chunks = String(value || '').split(/(\x60{3}[^\n]*\n[\s\S]*?\x60{3})/g);
@@ -528,7 +542,7 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
         }
       }
       const span = element('div', 'conv-text');
-      appendLinks(span, chunk);
+      appendRichInline(span, chunk);
       node.append(span);
     }
   }
@@ -561,7 +575,8 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
       const tools = toolGroup;
       toolGroup = [];
       const details = element('details', 'conv-tools');
-      const title = tools.length === 1 ? tools[0].title || 'Tool action' : tools.length + ' tool actions';
+      const firstAction = tools.find(tool => tool.title && tool.title !== 'Tool output')?.title || 'Tool activity';
+      const title = tools.length === 1 ? firstAction : firstAction + ' · ' + (tools.length - 1) + ' more';
       const summary = element('summary', '', title);
       details.append(summary);
       const list = element('ol', 'conv-steps');
