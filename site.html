@@ -60,6 +60,7 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
 .last-event strong{color:var(--ink);font-weight:550}
 .preview{display:block;max-width:100%;width:auto;max-height:440px;object-fit:contain;border:1px solid var(--line);border-radius:5px;background:#fff}
 .preview-link{font-size:12px;color:var(--green);text-decoration:none}.section-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.agents{padding:22px 0;border-bottom:1px solid var(--line)}.agents h3{font-size:13px;margin:0 0 12px}.agent-item{display:flex;width:100%;justify-content:space-between;gap:10px;padding:11px 0;text-align:left;background:none;border:0;border-top:1px solid var(--line);color:var(--ink)}.agent-item small{display:block;color:var(--muted)}.agent-item .status{align-self:center}
 .disclosure{border-bottom:1px solid var(--line)}
 .disclosure summary{padding:22px 0;list-style:none;display:flex;justify-content:space-between;align-items:center;cursor:pointer;font-size:13px;font-weight:650}
 .disclosure summary::-webkit-details-marker{display:none}.disclosure summary span{font-size:12px;font-weight:450;color:var(--muted)}
@@ -214,6 +215,7 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
 
   function filteredThreads() {
     return state.threads.filter(thread => {
+      if (thread.parent_id && state.threads.some(t => t.id === thread.parent_id)) return false;
       const matchesStatus = filter === 'all' || statusOf(thread) === filter;
       const matchesSource = selectedSource === 'all' || (thread.source || 'Codex') === selectedSource;
       return matchesStatus && matchesSource && (String(thread.title || '') + ' ' + String(thread.project || '') + ' ' + String(thread.source || '')).toLowerCase().includes(term);
@@ -334,7 +336,7 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
 
   function alignSelection() {
     const visible = filteredThreads();
-    if (!visible.some(thread => thread.id === selected)) selected = visible[0]?.id || null;
+    if (!visible.some(thread => thread.id === selected) && !state.threads.some(thread => thread.id === selected && thread.parent_id)) selected = visible[0]?.id || null;
     if (!mobile() && initialized) {
       const url = selected ? '#thread=' + encodeURIComponent(selected) : location.pathname + location.search;
       history.replaceState(null, '', url);
@@ -397,6 +399,12 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
     header.append(title, meta);
     root.append(header);
 
+    const parentLink = element('button', 'mobile-back parent-link', '← Parent thread');
+    parentLink.type = 'button';
+    parentLink.hidden = true;
+    parentLink.addEventListener('click', () => { const parent = state.threads.find(t => t.id === thread.parent_id); if (parent) openThread(parent.id); });
+    root.append(parentLink);
+
     const result = element('section', 'section result-section');
     result.append(element('h3', 'result-title', 'Result'), element('div', 'response'), element('div', 'last-event'));
     root.append(result);
@@ -418,6 +426,12 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
     preview.append(previewHeader, image);
     preview.hidden = true;
     root.append(preview);
+
+    const agents = element('section', 'agents');
+    agents.append(element('h3', '', 'Subagents'));
+    agents.append(element('div', 'agent-list'));
+    agents.hidden = true;
+    root.append(agents);
 
     const details = element('details', 'disclosure');
     const summary = element('summary', '', 'Activity');
@@ -454,6 +468,8 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
     }
     if (root.dataset.threadId !== thread.id) buildDetail(thread);
     const status = statusOf(thread);
+    const parent = state.threads.find(t => t.id === thread.parent_id);
+    root.querySelector('.parent-link').hidden = !parent;
     const title = root.querySelector('.detail-title');
     if (title.textContent !== thread.title) title.textContent = thread.title;
     setStatus(root.querySelector('.detail-status'), status);
@@ -500,6 +516,28 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
         link.hidden = false;
         image.src = url;
         link.href = url;
+      }
+    }
+
+    const children = state.threads.filter(item => item.parent_id === thread.id);
+    const agents = root.querySelector('.agents');
+    agents.hidden = !children.length;
+    const agentList = agents.querySelector('.agent-list');
+    const agentsKey = JSON.stringify(children.map(item => [item.id, item.title, item.status, item.updated_at]));
+    if (agentList.dataset.key !== agentsKey) {
+      agentList.dataset.key = agentsKey;
+      agentList.replaceChildren();
+      for (const child of children) {
+        const item = element('button', 'agent-item');
+        item.type = 'button';
+        const label = element('span');
+        label.append(element('span', '', child.agent_label || child.title));
+        label.append(element('small', '', child.title));
+        const stateBadge = element('span');
+        setStatus(stateBadge, statusOf(child));
+        item.append(label, stateBadge);
+        item.addEventListener('click', () => openThread(child.id));
+        agentList.append(item);
       }
     }
 
