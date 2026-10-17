@@ -30,6 +30,11 @@ function fail(message, status = 400, extra = {}) {
 function clean(input, max = 300) {
   return typeof input === 'string' ? input.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, max) : '';
 }
+function cleanBody(input, max = 3500) {
+  return typeof input === 'string'
+    ? input.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').trim().slice(0, max)
+    : '';
+}
 function number(input, fallback = 0) {
   return typeof input === 'number' && Number.isFinite(input) ? Math.floor(input) : fallback;
 }
@@ -145,12 +150,47 @@ async function agentAuthorized(request, env) {
   if (!h.startsWith('Bearer ') || typeof env.AGENT_TOKEN !== 'string') return false;
   return equalSecret(h.slice(7), env.AGENT_TOKEN);
 }
+// Legacy agents can still send internal reviews. Unlike user-facing review
+// subagents, Codex Guardian sessions are infrastructure, not coding tasks.
+function isGuardianReview(input) {
+  if (!input || String(input.source || 'Codex').toLowerCase() !== 'codex') return false;
+  return String(input.title || '').trim().toLowerCase() === 'guardian review'
+    || String(input.agent_label || '').trim().toLowerCase() === 'guardian';
+}
+const conversationRoles = new Set(['user', 'assistant', 'tool', 'notice']);
+function validateConversation(items, updated) {
+  if (!Array.isArray(items)) return undefined;
+  if (items.length > 50) return null;
+  let budget = 0;
+  const safe = [];
+  for (const raw of items) {
+    if (!raw || typeof raw !== 'object' || !conversationRoles.has(raw.role)) return null;
+    let at = number(raw.at, updated);
+    if (at < 946684800000 || at > Date.now() + 300_000) at = updated;
+    const item = {role: raw.role, at};
+    if (raw.role === 'tool') {
+      item.title = clean(raw.title, 150) || 'Tool';
+      item.detail = cleanBody(raw.detail, 1200);
+      item.output = cleanBody(raw.output, 1900);
+      item.error = raw.error === true;
+    } else {
+      item.text = cleanBody(raw.text, raw.role === 'assistant' ? 3600 : 2600);
+    }
+    budget += (item.text || '').length + (item.title || '').length +
+      (item.detail || '').length + (item.output || '').length + 80;
+    if (budget > 17000) return null;
+    safe.push(item);
+  }
+  return safe;
+}
 function validateThread(input, now) {
   if (!input || typeof input !== 'object' || !ID.test(input.id || '')) return null;
   const status = statuses.has(input.status) ? input.status : 'unknown';
   let updated = number(input.updated_at, now);
   if (updated > now + 300_000) updated = now;
   if (updated < 946684800000) updated = now; // Year 2000 minimum.
+  const conversation = validateConversation(input.conversation, updated);
+  if (conversation === null) return null;
   const events = Array.isArray(input.events) ? input.events.slice(-24).map(e => {
     const at = number(e && e.at, updated);
     return {
@@ -171,7 +211,10 @@ function validateThread(input, now) {
     updated_at: updated,
     started_at: number(input.started_at, updated),
     events,
-    final_response: clean(input.final_response, 6000),
+    final_response: cleanBody(input.final_response, 6000),
+    ...(conversation === undefined ? {} : {conversation,
+      conversation_truncated: input.conversation_truncated === true,
+      summary: cleanBody(input.summary, 160).replace(/\s+/g, ' ')}),
   };
 }
 async function sync(request, env) {
@@ -185,7 +228,7 @@ async function sync(request, env) {
     const t = validateThread(raw, now);
     if (!t || seen.has(t.id)) return fail('Invalid or duplicate thread');
     seen.add(t.id);
-    threads.push(t);
+    if (!isGuardianReview(t)) threads.push(t);
   }
   // D1 writes are the only mutations; never command or control the Mac agent.
   await env.DB.prepare('INSERT INTO devices (id,last_seen_at,thread_count) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET last_seen_at=excluded.last_seen_at,thread_count=excluded.thread_count')
@@ -225,7 +268,15 @@ async function state(env) {
   const [threadRows, deviceRows] = await Promise.all([
     env.DB.prepare(`SELECT t.snapshot, CASE WHEN p.thread_id IS NULL THEN 0 ELSE 1 END AS has_preview,
       p.updated_at AS preview_updated_at
-      FROM threads t LEFT JOIN previews p ON p.thread_id=t.id ORDER BY t.updated_at DESC LIMIT 40`).all(),
+      FROM threads t LEFT JOIN previews p ON p.thread_id=t.id
+      WHERE NOT (
+        LOWER(COALESCE(json_extract(t.snapshot, '$.source'), 'Codex')) = 'codex'
+        AND (
+          LOWER(TRIM(t.title)) = 'guardian review'
+          OR LOWER(COALESCE(json_extract(t.snapshot, '$.agent_label'), '')) = 'guardian'
+        )
+      )
+      ORDER BY t.updated_at DESC LIMIT 40`).all(),
     env.DB.prepare('SELECT id,last_seen_at,thread_count FROM devices ORDER BY last_seen_at DESC LIMIT 5').all(),
   ]);
   const threads = (threadRows.results || []).map(r => ({
@@ -258,27 +309,27 @@ async function pruneExpired(env) {
   await env.DB.prepare('DELETE FROM login_attempts WHERE reset_at < ?').bind(Date.now() - 86_400_000).run();
 }
 export default {
-  async scheduled(_event, env, _ctx) {
+  async scheduled(_event,env,_ctx) {
     await pruneExpired(env);
   },
   async fetch(request,env) {
     const path = new URL(request.url).pathname;
     if (!env.DB || !env.AGENT_TOKEN || !env.VIEW_PASSWORD || !env.SESSION_KEY) return fail('Server is missing its required configuration',503);
     try {
-      if (path==='/' && request.method==='GET') return page();
+      if (path==='/' && request.method==='GET') return await page();
       if (path==='/api/agent/sync' && request.method==='POST') {
         if (!(await agentAuthorized(request,env))) return fail('Unauthorized',401);
-        return sync(request,env);
+        return await sync(request,env);
       }
       if (path==='/api/agent/preview' && request.method==='POST') {
         if (!(await agentAuthorized(request,env))) return fail('Unauthorized',401);
-        return uploadPreview(request,env);
+        return await uploadPreview(request,env);
       }
-      if (path==='/api/login' && request.method==='POST') return login(request,env);
+      if (path==='/api/login' && request.method==='POST') return await login(request,env);
       if (path.startsWith('/api/')) {
         if (!(await authorized(request,env))) return fail('Unauthorized',401);
-        if (path==='/api/state' && request.method==='GET') return state(env);
-        if (path==='/api/preview' && request.method==='GET') return preview(request,env);
+        if (path==='/api/state' && request.method==='GET') return await state(env);
+        if (path==='/api/preview' && request.method==='GET') return await preview(request,env);
         if (path==='/api/logout' && request.method==='POST') {
           if (!csrfOK(request)) return fail('Invalid request origin',403);
           return json({ok:true},200,{'Set-Cookie':'observer_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0'});
