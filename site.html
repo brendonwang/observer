@@ -389,6 +389,109 @@ button:active:not(:disabled) {transform: translateY(1px)}
       container.append(section);
     }
   }
+
+  // Agent transcripts are untrusted text. Never evaluate returned content.
+  function appendRichInline(node, value) {
+    const segments=String(value||'').split(/(\*\*[^*\n]+\*\*|\x60[^\x60\n]+\x60|https:\/\/[^\s<>"']+)/g);
+    for(const segment of segments) {
+      if(!segment) continue;
+      if(segment.startsWith('**') && segment.endsWith('**')) {
+        node.append(el('strong','',segment.slice(2,-2)));
+      } else if(segment.startsWith(String.fromCharCode(96)) && segment.endsWith(String.fromCharCode(96))) {
+        node.append(el('code','',segment.slice(1,-1)));
+      } else if(/^https:\/\/[^\s<>"']+$/.test(segment)) {
+        try {
+          const link=el('a','',segment);
+          link.href=new URL(segment).href;
+          link.rel='noopener noreferrer';
+          link.target='_blank';
+          node.append(link);
+        } catch(_) {node.append(document.createTextNode(segment));}
+      } else {
+        node.append(document.createTextNode(segment));
+      }
+    }
+  }
+  function appendConversationText(node, value) {
+    const chunks=String(value||'').split(/(\x60{3}[^\n]*\n[\s\S]*?\x60{3})/g);
+    for(const chunk of chunks) {
+      if(!chunk) continue;
+      if(chunk.startsWith(String.fromCharCode(96).repeat(3))) {
+        const match=/^\x60{3}([^\n]*)\n([\s\S]*?)\x60{3}$/.exec(chunk);
+        if(match) {
+          const pre=el('pre');
+          if(match[1].trim()) pre.append(el('span','conv-code-label',match[1].trim().slice(0,30)));
+          pre.append(el('code','',match[2]));
+          node.append(pre);
+          continue;
+        }
+      }
+      const span=el('div','conv-text');
+      appendRichInline(span,chunk);
+      node.append(span);
+    }
+  }
+  function appendConversation(container, item) {
+    const entries=Array.isArray(item.conversation) ? item.conversation : null;
+    if(!entries) return false;
+    const title=el('div','conversation-head');
+    title.append(el('div','result-title','Conversation'));
+    if(item.conversation_truncated) title.append(el('span','conversation-note','Recent messages'));
+    container.append(title);
+    const feed=el('section','conversation');
+    feed.setAttribute('aria-label','Conversation');
+    if(!entries.length) feed.append(el('p','conv-notice','No conversation messages recorded yet.'));
+    let tools=[];
+    const flushTools=()=>{
+      if(!tools.length) return;
+      const groupItems=tools;
+      tools=[];
+      const group=el('details','conv-tools');
+      const first=groupItems.find(tool=>tool.title && tool.title!=='Tool output')?.title||'Tool activity';
+      group.append(el('summary','',groupItems.length===1 ? first : first+' · '+(groupItems.length-1)+' more'));
+      const list=el('ol','conv-steps');
+      for(const tool of groupItems) {
+        const row=el('li');
+        row.append(el('div',tool.error?'conv-step-title conv-step-error':'conv-step-title',tool.title||'Tool'));
+        if(tool.detail) {
+          const pre=el('pre','',tool.detail);
+          pre.setAttribute('aria-label','Tool input');
+          row.append(pre);
+        }
+        if(tool.output) {
+          const pre=el('pre','',tool.output);
+          pre.setAttribute('aria-label','Tool output');
+          row.append(pre);
+        }
+        list.append(row);
+      }
+      group.append(list);
+      feed.append(group);
+    };
+    for(const entry of entries) {
+      if(!entry || typeof entry!=='object') continue;
+      if(entry.role==='tool') {tools.push(entry);continue;}
+      flushTools();
+      if(entry.role==='notice') {feed.append(el('div','conv-notice',entry.text||'Activity'));continue;}
+      if(!['user','assistant'].includes(entry.role)) continue;
+      const article=el('article','conv-message '+entry.role);
+      const byline=el('div','conv-byline');
+      const date=new Date(Number(entry.at||0));
+      const time=Number(entry.at)>0 && Number.isFinite(date.getTime())
+        ? date.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}) : '';
+      byline.append(el('strong','',entry.role==='user'?'You':item.agent_label||item.source||'Assistant'),
+                    el('span','',time));
+      article.append(byline);
+      const body=el('div','conv-content');
+      appendConversationText(body,entry.text);
+      article.append(body);
+      feed.append(article);
+    }
+    flushTools();
+    container.append(feed);
+    return entries.length>0;
+  }
+
   function details(id, focusNode = null) {
     const item = state.threads.find(t => t.id === id);
     if (!item) return;
@@ -405,9 +508,12 @@ button:active:not(:disabled) {transform: translateY(1px)}
       back.addEventListener('click',()=>details(parent.id));
       content.append(back);
     }
-    if (item.final_response) {
+    const hasConversation=appendConversation(content,item);
+    if (!hasConversation && item.final_response) {
       content.append(el('div', 'result-title', 'Result'));
-      content.append(el('div', 'output', item.final_response));
+      const result=el('div','output');
+      appendConversationText(result,item.final_response);
+      content.append(result);
     }
     content.append(el('div', 'result-title', 'Activity'));
     const events = Array.isArray(item.events) ? item.events : [];
