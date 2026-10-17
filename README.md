@@ -1,14 +1,14 @@
 # Observer
 
-A private, read-only view of Codex Desktop threads on your phone. The Mac agent uses Python standard library; the website runs on Cloudflare Workers.
+A private, read-only activity dashboard for Codex Desktop, Claude Code, and custom JSON feeds. The local agent uses only Python's standard library; the hosted dashboard runs on Cloudflare Workers.
 
-The agent reads `~/.codex/sessions/**/*.jsonl` and `~/.codex/session_index.jsonl`. The website shows thread status, activity, completed responses (optional), and approved screenshots (optional). It does not control Codex, run commands, create tasks, or serve your Mac's local apps.
+Monitor multiple sources in one place, with per-source filtering, current status, activity, optional completed responses, and approved screenshots. Observer never executes local commands or remotely controls a source.
 
-> **Before enabling sync:** Check that your workspace permits sending Codex session metadata to Cloudflare. Responses and screenshots are optional and must also be approved.
+> **Privacy:** Session metadata is uploaded to your Cloudflare account. Completed responses and screenshots are off by default and require explicit opt-in. Do not sync workspaces that prohibit external storage.
 
 ## Interface (Taste Skill redesign)
 
-A thread list on the left; the selected thread on the right. On a phone, tap a thread to open it. The result and approved preview come first; activity is optional. The header shows connection state. Search, filters, login, and refresh are built in.
+A unified activity list on the left; the selected thread on the right. On a phone, tap a thread to open it. The result and approved preview come first; activity is optional. The header shows connection state. Search, filters, login, and refresh are built in.
 
 The upstream `minimalist-ui` skill is bundled locally under `.agents/skills/minimalist-ui/SKILL.md` for future design work on this project. See `INSTALL-TASTE.md` to install or update the official Taste bundle on your Mac. This is a project-level copy, **not a system-wide ChatGPT skill installation**.
 
@@ -18,7 +18,7 @@ The upstream `minimalist-ui` skill is bundled locally under `.agents/skills/mini
 | --- | --- |
 | `worker.js` | **Single standalone file** to paste into Cloudflare Worker editor |
 | `schema.sql` | Cloudflare D1 database tables |
-| `agent.py` | Mac observer (Python 3.9+, standard library only) |
+| `agent.py` | Multi-source Mac agent (Python 3.9+, standard library only) |
 | `site.html` | Editable dashboard UI source |
 | `worker_source.js` | Worker server code before HTML bundling |
 | `build_worker.py` | Rebuild `worker.js` after editing source/UI |
@@ -29,9 +29,9 @@ The upstream `minimalist-ui` skill is bundled locally under `.agents/skills/mini
 
 ## Deployment: Cloudflare dashboard, no command-line hosting tools
 
-1. Sign in to [Cloudflare Dashboard](https://dash.cloudflare.com/). Create a free Workers & Pages **Worker** called something like `codex-observer` (use the starter / Hello World Worker, then **Edit Code**).
-2. Create a **D1 SQL database** called `codex-observer-db`. In the database's **Console**, paste the entire contents of `schema.sql` and execute. Cloudflare officially supports both database creation and SQL Console from its dashboard.
-3. Return to your Worker. Under **Bindings**, add a **D1 database** binding. Set **Variable name exactly `DB`** and select `codex-observer-db`.
+1. Sign in to [Cloudflare Dashboard](https://dash.cloudflare.com/). Create a free Workers & Pages **Worker** called something like `observer` (use the starter / Hello World Worker, then **Edit Code**).
+2. Create a **D1 SQL database** called `observer-db`. In the database's **Console**, paste the entire contents of `schema.sql` and execute. Cloudflare officially supports both database creation and SQL Console from its dashboard.
+3. Return to your Worker. Under **Bindings**, add a **D1 database** binding. Set **Variable name exactly `DB`** and select `observer-db`.
 4. Generate **three different random secrets** in Ghostty on your Mac (nothing is installed):
 
    ```bash
@@ -50,16 +50,52 @@ If your Worker returns "Server is missing its required configuration," verify th
 
 **Hosted service requirements:** a Cloudflare account and a Mac with Python 3.9+ (often already installed through development tools). There is no public deployed URL included in this package; only you can link the dashboard to your Cloudflare account.
 
+
+## Monitoring sources
+
+During \`python3 agent.py init\`, enter any combination of \`codex,claude,files\`. The defaults are \`codex,files\`.
+
+- **Codex**: Codex Desktop JSONL sessions and titles. Existing deployments remain compatible.
+- **Claude Code**: Claude Code session JSONL files in \`~/.claude/projects\`. It detects user turns, assistant messages, tool names, and explicit completion markers. It never uploads thinking blocks or tool arguments.
+- **Custom**: Any job, script, CI process, or AI tool can write a small JSON snapshot to \`~/.observer/feeds\`. Observer only reads those files.
+
+For custom sources, create \`~/.observer/feeds/build.json\`:
+
+\`\`\`json
+{
+  "id": "build-001",
+  "source": "CI",
+  "title": "Deploy staging",
+  "project": "website",
+  "status": "working",
+  "events": [
+    {"kind": "start", "label": "Build started", "at": 1792195200000}
+  ]
+}
+\`\`\`
+
+The optional fields are \`updated_at\`, \`started_at\` (Unix milliseconds), \`final_response\`, and more \`events\`. Status must be \`working\`, \`completed\`, \`quiet\`, \`interrupted\`, or \`unknown\`. Events may use \`start\`, \`complete\`, \`warning\`, \`tool\`, \`message\`, \`thought\`, or \`info\`. Set \`status: "completed"\` and provide \`final_response\` to display a result **only if** final responses were enabled in the local agent.
+
+Custom files are data, not executable instructions. Observer limits each file to 128 KiB, rejects symlinks, and reads only the explicitly configured directory. It does not recursively inspect arbitrary project files.
+
+To add sources to an existing configuration, edit \`~/.observer/config.json\` and set:
+
+\`\`\`json
+"sources": [{"type":"codex"},{"type":"claude"},{"type":"files"}]
+\`\`\`
+
+Existing installations using \`~/.codex-monitor/config.json\` continue to work without modification, using Codex-only mode. Re-running \`init\` saves a new \`~/.observer/config.json\` configuration. The host uses the existing \`protocol: 1\` ingestion endpoint and database schema; no D1 migration is required.
+
 ## Run the Mac agent
 
 1. Copy `agent.py` to any folder on your Mac. In Ghostty, `cd` to that folder.
-2. Ensure your local Codex data exists: `ls ~/.codex/sessions`. If that path doesn't exist, this Codex Desktop installation may store its sessions elsewhere and the watcher won't find them; see troubleshooting.
+2. Choose your sources: Codex (`~/.codex/sessions`), Claude Code (`~/.claude/projects`), or JSON snapshot files (`~/.observer/feeds`). Missing sources simply produce no activity.
 3. Run `python3 agent.py init`. Paste your Worker URL and **AGENT_TOKEN** when prompted. The token input is hidden.
 4. The setup asks whether you want to share final assistant responses. The default is **No (metadata only)**. Answer `y` to show final responses on the website. You can also provide a **dedicated, approved** screenshot directory (see below).
 5. Start monitoring with `python3 agent.py watch`. Leave it running when you want near-live progress; the dashboard refreshes about every 12 seconds and the Mac reports about every 30 seconds.
 6. On your phone, visit the same HTTPS Worker URL and log in with **VIEW_PASSWORD**. Bookmark it or add it to your home screen using your browser's built-in feature (optional).
 
-The local agent config lives at `~/.codex-monitor/config.json` with owner-only (`0600`) permissions. Keep your token private. Your Mac can sleep; the website will then show the last synced snapshot and indicate that the Mac is offline. It cannot see new changes until the Mac reconnects.
+The local agent config lives at `~/.observer/config.json` with owner-only (`0600`) permissions. Keep your token private. Your Mac can sleep; the website will then show the last synced snapshot and indicate that the Mac is offline. It cannot see new changes until the Mac reconnects.
 
 ### Make the monitoring agent start at macOS login (optional)
 
@@ -70,7 +106,7 @@ chmod +x install-launch-agent.sh
 ./install-launch-agent.sh
 ```
 
-The script requires that you have already run `python3 agent.py init`. It writes a LaunchAgent to `~/Library/LaunchAgents/dev.codex.observer.plist`, starts it through `launchctl`, and writes logs under `~/.codex-monitor`. To stop it, run `launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/dev.codex.observer.plist`. The Mac needs to be logged in and awake to publish live updates.
+The script requires that you have already run `python3 agent.py init`. It writes a LaunchAgent to `~/Library/LaunchAgents/dev.observer.agent.plist`, starts it through `launchctl`, and writes logs under `~/.observer`. To stop it, run `launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/dev.observer.agent.plist`. The Mac needs to be logged in and awake to publish live updates.
 
 ### See the final product
 
