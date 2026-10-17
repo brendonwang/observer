@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Verify generated Worker
+        run: npm run test:build
+      - name: Node / Worker / CLI tests
+        run: npm test
+      - name: Python agent / UI tests
+        run: npm run test:agent
+      - name: Verify npm package contents
+        run: npm pack --dry-run
+
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Verify platform and CLI help
+        run: |
+          node bin/observer.js --help
+          node bin/observer.js doctor
+      - name: Run local activity tests
+        run: node --test tests/cli.test.js tests/setup.test.js
