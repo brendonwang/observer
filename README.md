@@ -53,15 +53,15 @@ If your Worker returns "Server is missing its required configuration," verify th
 
 ## Monitoring sources
 
-During \`python3 agent.py init\`, enter any combination of \`codex,claude,files\`. The defaults are \`codex,files\`.
+During `python3 agent.py init`, enter any combination of `codex,claude,files`. The defaults are `codex,files`.
 
 - **Codex**: Codex Desktop JSONL sessions and titles. Existing deployments remain compatible.
-- **Claude Code**: Claude Code session JSONL files in \`~/.claude/projects\`. It detects user turns, assistant messages, tool names, and explicit completion markers. It never uploads thinking blocks or tool arguments.
-- **Custom**: Any job, script, CI process, or AI tool can write a small JSON snapshot to \`~/.observer/feeds\`. Observer only reads those files.
+- **Claude Code**: Claude Code session JSONL files in `~/.claude/projects`. It detects user turns, assistant messages, tool names, and explicit completion markers. It never uploads thinking blocks or tool arguments.
+- **Custom**: Any job, script, CI process, or AI tool can write a small JSON snapshot to `~/.observer/feeds`. Observer only reads those files.
 
-For custom sources, create \`~/.observer/feeds/build.json\`:
+For custom sources, create `~/.observer/feeds/build.json`:
 
-\`\`\`json
+```json
 {
   "id": "build-001",
   "source": "CI",
@@ -72,19 +72,19 @@ For custom sources, create \`~/.observer/feeds/build.json\`:
     {"kind": "start", "label": "Build started", "at": 1792195200000}
   ]
 }
-\`\`\`
+```
 
-The optional fields are \`updated_at\`, \`started_at\` (Unix milliseconds), \`final_response\`, and more \`events\`. Status must be \`working\`, \`completed\`, \`quiet\`, \`interrupted\`, or \`unknown\`. Events may use \`start\`, \`complete\`, \`warning\`, \`tool\`, \`message\`, \`thought\`, or \`info\`. Set \`status: "completed"\` and provide \`final_response\` to display a result **only if** final responses were enabled in the local agent.
+The optional fields are `updated_at`, `started_at` (Unix milliseconds), `final_response`, and more `events`. Status must be `working`, `completed`, `quiet`, `interrupted`, or `unknown`. Events may use `start`, `complete`, `warning`, `tool`, `message`, `thought`, or `info`. Set `status: "completed"` and provide `final_response` to display a result **only if** final responses were enabled in the local agent.
 
 Custom files are data, not executable instructions. Observer limits each file to 128 KiB, rejects symlinks, and reads only the explicitly configured directory. It does not recursively inspect arbitrary project files.
 
-To add sources to an existing configuration, edit \`~/.observer/config.json\` and set:
+To add sources to an existing configuration, edit `~/.observer/config.json` and set:
 
-\`\`\`json
+```json
 "sources": [{"type":"codex"},{"type":"claude"},{"type":"files"}]
-\`\`\`
+```
 
-Existing installations using \`~/.codex-monitor/config.json\` continue to work without modification, using Codex-only mode. Re-running \`init\` saves a new \`~/.observer/config.json\` configuration. The host uses the existing \`protocol: 1\` ingestion endpoint and database schema; no D1 migration is required.
+Existing installations using `~/.codex-monitor/config.json` continue to work without modification, using Codex-only mode. Re-running `init` saves a new `~/.observer/config.json` configuration. The host uses the existing `protocol: 1` ingestion endpoint and database schema; no D1 migration is required.
 
 ## Run the Mac agent
 
