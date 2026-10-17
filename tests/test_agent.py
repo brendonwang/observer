@@ -205,6 +205,81 @@ class AgentTests(unittest.TestCase):
         self.assertNotIn('PRIVATE TOOL ARG', json.dumps(item))
         self.assertEqual(agent.gather_pi_sessions(root)[0]['final_response'], '')
 
+    def test_guardian_review_metadata_is_suppressed(self):
+        parent = '54f114f4-aaaa-4e12-8888-000000000002'
+        for meta in (
+            {'thread_source': 'guardian_review', 'parent_thread_id': parent,
+             'source': {'subagent': {'other': 'guardian'}}},
+            {'thread_source': 'subagent', 'parent_thread_id': parent,
+             'source': {'subagent': {'other': 'guardian'}}},
+        ):
+            self.write_events(
+                self.row('session_meta', {'type': 'session_meta', **meta}),
+                self.row('event_msg', {'type': 'task_started'}),
+            )
+            self.assertIsNone(agent.parse_session(self.path, {}, content_mode='final'))
+            self.assertEqual(agent.gather_sessions(self.root, self.index), [])
+        self.assertFalse(agent.is_codex_guardian({'thread_source': 'subagent',
+            'source': {'subagent': {'thread_spawn': {'parent_thread_id': parent}}}}))
+
+    def test_guardian_rollouts_do_not_displace_real_threads(self):
+        self.write_events(
+            self.row('session_meta', {'type': 'session_meta', 'cwd': '/tmp/work'}),
+            self.row('event_msg', {'type': 'task_started'}),
+        )
+        # More internal reviewers than the session limit, newer than the user task.
+        old = time.time() - 200
+        os.utime(self.path, (old, old))
+        for i in range(100):
+            child_id = '12345678-1234-1234-1234-%012d' % i
+            child = self.root / ('rollout-new-' + child_id + '.jsonl')
+            child.write_text(json.dumps(self.row('session_meta', {
+                'type': 'session_meta', 'thread_source': 'guardian_review',
+                'parent_thread_id': THREAD_ID,
+                'source': {'subagent': {'other': 'guardian'}},
+            })) + '\n')
+        result = agent.gather_sessions(self.root, self.index, max_sessions=1)
+        self.assertEqual([item['id'] for item in result], [THREAD_ID])
+
+    def test_transcript_requires_opt_in(self):
+        self.write_events(
+            self.row('session_meta', {'type': 'session_meta', 'cwd': '/tmp/website'}),
+            self.row('event_msg', {'type': 'user_message', 'message': 'PRIVATE USER PROMPT'}),
+            self.row('event_msg', {'type': 'task_started'}),
+            self.row('response_item', {'type': 'function_call', 'name': 'exec_command',
+                'arguments': json.dumps({'cmd':'python -m unittest'}), 'call_id': 'c1'}),
+            self.row('response_item', {'type': 'function_call_output',
+                'call_id': 'c1', 'output': '2 tests passed'}),
+            self.row('event_msg', {'type': 'agent_message', 'message': 'Completed the fix'}),
+            self.row('event_msg', {'type': 'task_complete'}),
+        )
+        default = agent.gather_sessions(self.root, self.index)[0]
+        final = agent.gather_sessions(self.root, self.index, content_mode='final')[0]
+        full = agent.gather_sessions(self.root, self.index, content_mode='transcript')[0]
+        self.assertNotIn('PRIVATE USER PROMPT', json.dumps(default))
+        self.assertNotIn('PRIVATE USER PROMPT', json.dumps(final))
+        self.assertNotIn('conversation', default)
+        self.assertNotIn('conversation', final)
+        self.assertEqual(full['conversation'][0]['text'], 'PRIVATE USER PROMPT')
+        self.assertIn('python -m unittest', json.dumps(full['conversation']))
+        self.assertEqual(full['summary'], 'Completed the fix')
+
+    def test_mode_toggle_preserves_existing_token(self):
+        config = self.dir / 'toggle.json'
+        original = {'endpoint': 'https://abc.workers.dev', 'agent_token': 'x' * 40,
+                    'device_id': 'mac-' + '9' * 12, 'content_mode': 'metadata'}
+        agent.write_config(original, config)
+        with patch('builtins.input', return_value='WRONG'):
+            with self.assertRaises(ValueError):
+                agent.set_content_mode(config, 'transcript')
+        self.assertEqual(agent.read_config(config)['content_mode'], 'metadata')
+        with patch('builtins.input', return_value='SYNC'):
+            agent.set_content_mode(config, 'transcript')
+        self.assertEqual(agent.read_config(config)['agent_token'], original['agent_token'])
+        self.assertEqual(agent.read_config(config)['content_mode'], 'transcript')
+        agent.set_content_mode(config, 'metadata')
+        self.assertEqual(agent.read_config(config)['content_mode'], 'metadata')
+
     def test_https_required(self):
         with self.assertRaises(ValueError):
             agent.validate_endpoint('http://example.com')
