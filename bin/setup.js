@@ -183,7 +183,8 @@ export async function deploy() {
 export async function setup() {
   findPython();
   console.log('Observer setup\n');
-  const prior=readJSON(CONFIG);
+  const prior=readJSON(CONFIG) || readJSON(path.join(os.homedir(), '.codex-monitor', 'config.json'));
+  const priorSources=Array.isArray(prior?.sources)?prior.sources:[{type:'codex'}];
   let endpoint,agentToken;
   const choice=await question('Hosting: [1] deploy to Cloudflare, [2] existing Worker (default 2): ','2');
   if(choice==='1') ({endpoint,agentToken}=await provision());
@@ -199,7 +200,8 @@ export async function setup() {
   const config={
     endpoint,agent_token:agentToken,device_id:prior?.device_id || 'mac-'+crypto.randomBytes(6).toString('hex'),
     content_mode:share?'final':'metadata',screenshots_dir:prior?.screenshots_dir||'',
-    interval_seconds:30,max_sessions:20,sources:types.map(type=>({type})),
+    interval_seconds:30,max_sessions:20,
+    sources:types.map(type=>priorSources.find(item=>(typeof item==='string'?item:item?.type)===type) || {type}),
   };
   privateWrite(CONFIG,config);
   installRuntime();
