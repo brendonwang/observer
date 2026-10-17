@@ -52,7 +52,7 @@ def monitor_service(item, now=None, opener=None):
     except (urllib.error.URLError, TimeoutError, OSError):
         pass
     elapsed = int((time.monotonic() - started) * 1000)
-    healthy = status is not None and 200 <= status < 400
+    healthy = status is not None and 200 <= status < 300
     uid = hashlib.sha256((name + "\0" + url).encode("utf-8")).hexdigest()[:24]
     return {
         "id": "service-" + uid,
