@@ -28,6 +28,7 @@ LEGACY_CONFIG_PATH = Path.home() / ".codex-monitor" / "config.json"
 SESSIONS_PATH = Path.home() / ".codex" / "sessions"
 INDEX_PATH = Path.home() / ".codex" / "session_index.jsonl"
 CLAUDE_PATH = Path.home() / ".claude" / "projects"
+PI_PATH = Path.home() / ".pi" / "agent" / "sessions"
 FEEDS_PATH = Path.home() / ".observer" / "feeds"
 STATUSES = {"working", "completed", "quiet", "interrupted", "unknown"}
 EVENT_KINDS = {"start", "complete", "warning", "tool", "message", "thought", "info"}
@@ -115,6 +116,63 @@ def extract_assistant_text(p: dict) -> str:
     return ""
 
 
+
+def first_record(path: Path, limit: int = 128_000) -> dict:
+    """Read session metadata even when the JSONL tail no longer includes its header."""
+    try:
+        with path.open("rb") as fh:
+            line = fh.readline(limit + 1)
+        if len(line) > limit:
+            return {}
+        item = json.loads(line)
+        return item if isinstance(item, dict) else {}
+    except (OSError, ValueError, UnicodeDecodeError):
+        return {}
+
+
+def small_json(path: Path, max_bytes: int = 8192) -> dict:
+    """Read an optional, bounded sidecar (never follow symlinks)."""
+    try:
+        if path.is_symlink() or not 0 < path.stat().st_size <= max_bytes:
+            return {}
+        value = json.loads(path.read_text("utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError, UnicodeDecodeError):
+        return {}
+
+
+def codex_parent(meta: dict) -> str:
+    """Prefer the rollout's explicit relationship; never infer from prompts."""
+    parent = meta.get("parent_thread_id")
+    src = meta.get("source")
+    if not parent and isinstance(src, dict):
+        subagent = src.get("subagent")
+        if isinstance(subagent, dict):
+            spawn = subagent.get("thread_spawn")
+            if isinstance(spawn, dict):
+                parent = spawn.get("parent_thread_id")
+    return parent.lower() if isinstance(parent, str) and UUID_PATTERN.fullmatch(parent) else ""
+
+
+def codex_agent_label(meta: dict) -> str:
+    src = meta.get("source")
+    if isinstance(src, dict) and isinstance(src.get("subagent"), dict):
+        details = src["subagent"]
+        spawn = details.get("thread_spawn")
+        if isinstance(spawn, dict):
+            for key in ("agent_nickname", "agent_role", "agent_path"):
+                value = spawn.get(key)
+                if isinstance(value, str) and value.strip():
+                    return cleaned(value.split("/")[-1] if key == "agent_path" else value, 65)
+        other = details.get("other")
+        if isinstance(other, str):
+            return cleaned(other, 65)
+    for key in ("agent_nickname", "agent_role"):
+        if isinstance(meta.get(key), str):
+            return cleaned(meta[key], 65)
+    return "Subagent"
+
+
 def parse_session(path: Path, titles: dict[str, str], content_mode: str = "metadata") -> dict | None:
     stem = path.stem
     if not stem.startswith("rollout-"):
@@ -124,8 +182,13 @@ def parse_session(path: Path, titles: dict[str, str], content_mode: str = "metad
         return None
     thread_id = match.group(1)
     records = read_tail_records(path)
+    first = first_record(path)
+    metadata = first.get("payload", {}) if first.get("type") == "session_meta" else {}
+    if not isinstance(metadata, dict):
+        metadata = {}
     events = []
-    project = "Unknown project"
+    cwd = metadata.get("cwd")
+    project = cleaned(Path(cwd).name, 80) if isinstance(cwd, str) and cwd else "Unknown project"
     event_state = "unknown"
     candidate_message = ""
     completed_message = ""
@@ -143,6 +206,7 @@ def parse_session(path: Path, titles: dict[str, str], content_mode: str = "metad
             continue
         kind = payload.get("type")
         if item.get("type") == "session_meta":
+            metadata = payload
             cwd = payload.get("cwd", "")
             if isinstance(cwd, str) and cwd:
                 project = cleaned(Path(cwd).name or "Project", 80)
@@ -196,6 +260,8 @@ def parse_session(path: Path, titles: dict[str, str], content_mode: str = "metad
         "title": titles.get(thread_id) or (project if project != "Unknown project" else "Codex session"),
         "project": project,
         "source": "Codex",
+        "parent_id": codex_parent(metadata) if codex_parent(metadata) != thread_id.lower() else "",
+        "agent_label": codex_agent_label(metadata) if codex_parent(metadata) or metadata.get("thread_source") == "subagent" else "",
         "status": event_state,
         "updated_at": last_activity_ms,
         "started_at": first_timestamp or last_activity_ms,
@@ -224,9 +290,28 @@ def gather_sessions(root: Path = SESSIONS_PATH, index: Path = INDEX_PATH,
         except OSError:
             continue
     paths.sort(reverse=True)
+    # Index filenames so recent child rollouts can bring along older parents.
+    indexed = {}
+    for _, path in paths:
+        match = UUID_PATTERN.search(path.stem)
+        if match and path.stem.endswith(match.group()):
+            indexed[match.group().lower()] = path
+    chosen = {}
+    for _, path in paths[:max_sessions * 4]:
+        cursor = path
+        for _ in range(10):  # bounded ancestor walk
+            if cursor in chosen:
+                break
+            chosen[cursor] = True
+            entry = first_record(cursor)
+            meta = entry.get("payload") if entry.get("type") == "session_meta" else None
+            parent = codex_parent(meta) if isinstance(meta, dict) else ""
+            cursor = indexed.get(parent)
+            if cursor is None:
+                break
     titles = load_titles(index)
     result = []
-    for _, path in paths[:max_sessions]:
+    for path in chosen:
         item = parse_session(path, titles, content_mode)
         if item:
             result.append(item)
