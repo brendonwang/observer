@@ -1,6 +1,6 @@
 # Observer
 
-A private, read-only activity dashboard for Codex Desktop, Claude Code, and custom JSON feeds. The local agent uses only Python's standard library; the hosted dashboard runs on Cloudflare Workers.
+A private, read-only activity dashboard for Codex Desktop, Claude Code, Pi coding agent, and custom JSON feeds. The local agent uses only Python's standard library; the hosted dashboard runs on Cloudflare Workers.
 
 Monitor multiple sources in one place, with per-source filtering, current status, activity, optional completed responses, and approved screenshots. Observer never executes local commands or remotely controls a source.
 
@@ -68,10 +68,12 @@ If the Worker reports **"Server is missing its required configuration"**, check 
 
 ## Monitoring sources
 
-During `python3 agent.py init`, enter any combination of `codex,claude,files`. The defaults are `codex,files`.
+During `python3 agent.py init`, enter any combination of `codex,claude,pi,files`. The defaults are `codex,files`.
 
 - **Codex**: Codex Desktop JSONL sessions and titles. Existing deployments remain compatible.
 - **Claude Code**: Claude Code session JSONL files in `~/.claude/projects`. It detects user turns, assistant messages, tool names, and explicit completion markers. It never uploads thinking blocks or tool arguments.
+- **Pi coding agent**: Reads session JSONL under `~/.pi/agent/sessions`. Pi forks with an explicit `parentSession` appear beneath their parent. Branches within the same Pi session file are not separate tasks.
+- **Subagents**: Codex and Claude Code child sessions are grouped under their parents when explicit lineage is available, rather than cluttering the main thread list. Missing parents leave their children accessible as standalone sessions.
 - **Custom**: Any job, script, CI process, or AI tool can write a small JSON snapshot to `~/.observer/feeds`. Observer only reads those files.
 
 For custom sources, create `~/.observer/feeds/build.json`:
@@ -96,7 +98,7 @@ Custom files are data, not executable instructions. Observer limits each file to
 To add sources to an existing configuration, edit `~/.observer/config.json` and set:
 
 ```json
-"sources": [{"type":"codex"},{"type":"claude"},{"type":"files"}]
+"sources": [{"type":"codex"},{"type":"claude"},{"type":"pi"},{"type":"files"}]
 ```
 
 Existing installations using `~/.codex-monitor/config.json` continue to work without modification, using Codex-only mode. Re-running `init` saves a new `~/.observer/config.json` configuration. The host uses the existing `protocol: 1` ingestion endpoint and database schema; no D1 migration is required.
@@ -104,7 +106,7 @@ Existing installations using `~/.codex-monitor/config.json` continue to work wit
 ## Run the Mac agent
 
 1. Clone or update this repository on your Mac, and open it in your terminal. Use the same version of `agent.py` as the deployed `worker.js`.
-2. Choose your sources: Codex (`~/.codex/sessions`), Claude Code (`~/.claude/projects`), or JSON snapshot files (`~/.observer/feeds`). Missing sources simply produce no activity.
+2. Choose your sources: Codex (`~/.codex/sessions`), Claude Code (`~/.claude/projects`), Pi (`~/.pi/agent/sessions`), or JSON snapshot files (`~/.observer/feeds`). Missing sources simply produce no activity.
 3. Run `python3 agent.py init`. Enter your deployed Worker URL and the **`AGENT_TOKEN` secret** when prompted (not `VIEW_PASSWORD`).
 4. Select whether to share completed responses; **metadata only** is the default. You may also select an approved screenshots folder.
 5. **Verify syncing first:** Run `python3 agent.py once`. A successful test prints `Synced N threads`, including when `N` is zero. An HTTP error means setup is incomplete; see **Troubleshooting**. Do not proceed to continuous monitoring until this succeeds.

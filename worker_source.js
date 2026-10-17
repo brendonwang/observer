@@ -164,6 +164,8 @@ function validateThread(input, now) {
     title: clean(input.title, 110) || 'Untitled activity',
     project: clean(input.project, 80) || 'Unknown project',
     source: clean(input.source, 40) || 'Codex',
+    parent_id: ID.test(input.parent_id || '') && input.parent_id !== input.id ? input.parent_id : '',
+    agent_label: clean(input.agent_label, 65),
     status,
     updated_at: updated,
     started_at: number(input.started_at, updated),
