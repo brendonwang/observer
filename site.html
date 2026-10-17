@@ -261,7 +261,15 @@ button:active:not(:disabled) {transform: translateY(1px)}
   const now = Date.now(), minutes = n => now - n * 60_000;
   const demoState = {
     devices: [{id: 'demo', last_seen_at: now}], threads: [
-      {id: 'demo-agent', project: 'observer', source: 'Codex', title: 'Implement notifications', status: 'working', updated_at: minutes(4), events: [{kind: 'start', label: 'Agent started', at: minutes(4)}]},
+      {id: 'demo-agent', project: 'observer', source: 'Codex', title: 'Implement notifications', status: 'working', updated_at: minutes(4),
+        events: [{kind: 'start', label: 'Agent started', at: minutes(4)}],
+        conversation: [
+          {role:'user',text:'Implement a lightweight notification system. Show me the changes.',at:minutes(9)},
+          {role:'assistant',text:'I am adding completion and failure notifications with opt-in settings.',at:minutes(8)},
+          {role:'tool',title:'Read notification handlers',detail:'src/notifications.ts',output:'Located existing status callbacks.',at:minutes(7)},
+          {role:'tool',title:'Updated notification components',detail:'src/notifications.ts',output:'Added the notification event formatter.',at:minutes(6)},
+          {role:'assistant',text:'The event formatter is in place. I am running the tests now.',at:minutes(4)}
+        ]},
       {id: 'demo-test', project: 'observer', source: 'Terminal', title: 'npm test', status: 'completed', updated_at: minutes(8), final_response: '24 tests passed.', events: [{kind: 'complete', label: 'Tests passed', at: minutes(8)}]},
       {id: 'demo-server', project: 'observer', source: 'Service', title: 'Development server', status: 'completed', updated_at: minutes(1), final_response: 'localhost:3000 - healthy', events: []},
       {id: 'demo-ci', project: 'saco-judge', source: 'GitHub Actions', title: 'CI pipeline', status: 'interrupted', updated_at: minutes(12), events: [{kind: 'warning', label: 'CI failed', at: minutes(12)}]},
