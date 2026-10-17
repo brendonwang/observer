@@ -20,7 +20,13 @@ class FakeDB {
       throw Error('Unexpected first: '+sql);
     },
     async all(){
-      if(sql.includes('LEFT JOIN previews'))return {results:[...db.threads.values()].sort((a,b)=>b.updated_at-a.updated_at).map(t=>({snapshot:t.snapshot,has_preview:db.previews.has(t.id)?1:0,preview_updated_at:db.previews.get(t.id)?.updated_at||0}))};
+      if(sql.includes('LEFT JOIN previews'))return {results:[...db.threads.values()].filter(t=>{
+        const snap=JSON.parse(t.snapshot);
+        return !(String(snap.source||'Codex').toLowerCase()==='codex' && (
+          String(t.title||'').trim().toLowerCase()==='guardian review' ||
+          String(snap.agent_label||'').trim().toLowerCase()==='guardian'
+        ));
+      }).sort((a,b)=>b.updated_at-a.updated_at).slice(0,40).map(t=>({snapshot:t.snapshot,has_preview:db.previews.has(t.id)?1:0,preview_updated_at:db.previews.get(t.id)?.updated_at||0}))};
       if(sql.includes('FROM devices'))return {results:[...db.devices.values()]};
       throw Error('Unexpected all: '+sql);
     },
@@ -30,7 +36,7 @@ class FakeDB {
       if(sql.includes('INSERT INTO previews')){db.previews.set(args[0],{thread_id:args[0],filename:args[1],mime:args[2],image_b64:args[3],updated_at:Date.now()});return{};}
       if(sql.includes('INSERT INTO login_attempts')){const prev=db.attempts.get(args[0]);db.attempts.set(args[0],{attempts:prev&&prev.reset_at>args[2]-900000?prev.attempts+1:1,reset_at:args[2]});return{};}
       if(sql.startsWith('DELETE FROM previews WHERE thread_id IN')) {
-        for (const id of [...db.previews.keys()]) {
+        for(const [id,preview] of db.previews) {
           const thread=db.threads.get(id);
           if(thread && thread.received_at<args[0]) db.previews.delete(id);
         }
@@ -103,6 +109,92 @@ test('unexpected D1 failures stay private with HTTP 500',async()=>{
   }),brokenEnv);
   assert.equal(response.status,500);
   assert.deepEqual(await response.json(),{error:'Internal server error'});
+});
+
+test('Guardian reviews are discarded at ingestion without suppressing real review workers',async()=>{
+  const working={id:'9b7de491-44c4-4979-8b1f-f2eacc612346',
+    source:'Codex', title:'Review authentication', project:'app',
+    agent_label:'reviewer', status:'working', updated_at:Date.now(), events:[]};
+  const guardian={...working,id:'9b7de491-44c4-4979-8b1f-f2eacc612347',
+    title:'Guardian review',agent_label:'guardian'};
+  const db=new FakeDB();
+  const localEnv={...env,DB:db};
+  const response=await worker.fetch(new Request(origin+'/api/agent/sync',{
+    method:'POST',
+    headers:{Authorization:'Bearer '+env.AGENT_TOKEN,'Content-Type':'application/json'},
+    body:JSON.stringify({protocol:1,device_id:'mac-123456789abc',threads:[guardian,working]}),
+  }),localEnv);
+  assert.equal(response.status,200);
+  assert.equal((await response.json()).accepted,1);
+  assert.ok(db.threads.has(working.id));
+  assert.equal(db.threads.has(guardian.id),false);
+});
+
+test('cached Guardians do not crowd older real sessions out of state',async()=>{
+  const database=new FakeDB();
+  const localEnv={...env,DB:database};
+  const now=Date.now();
+  for(let i=0;i<65;i++){
+    const id='guardian-'+String(i).padStart(8,'0');
+    const title='Guardian review';
+    const snapshot={id,source:'Codex',title,agent_label:'',updated_at:now+i};
+    database.threads.set(id,{id,title,updated_at:now+i,snapshot:JSON.stringify(snapshot)});
+  }
+  const legacy={id:'9b7de491-44c4-4979-8b1f-f2eacc612348',source:'Codex',
+    title:'Fix build pipeline',updated_at:now-50000};
+  database.threads.set(legacy.id,{...legacy,snapshot:JSON.stringify(legacy)});
+  const userReview={id:'9b7de491-44c4-4979-8b1f-f2eacc612349',source:'Custom',
+    title:'Guardian review',updated_at:now-60000};
+  database.threads.set(userReview.id,{...userReview,snapshot:JSON.stringify(userReview)});
+  const login=await worker.fetch(new Request(origin+'/api/login',{
+    method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},
+    body:JSON.stringify({password:env.VIEW_PASSWORD}),
+  }),localEnv);
+  assert.equal(login.status,200);
+  const cookie=login.headers.get('set-cookie').split(';')[0];
+  const response=await worker.fetch(new Request(origin+'/api/state',{
+    headers:{Cookie:cookie},
+  }),localEnv);
+  assert.equal(response.status,200);
+  const list=(await response.json()).threads;
+  assert.deepEqual(list.map(t=>t.id),[legacy.id,userReview.id]);
+});
+
+test('transcript records preserve line breaks and reject oversize blocks',async()=>{
+  const id='9b7de491-44c4-4979-8b1f-f2eacc612355';
+  const one={role:'user',text:'Build a dashboard\nfor Codex',at:Date.now()};
+  const two={role:'tool',title:'Ran npm test',detail:'npm test',output:'Pass\n18 tests',at:Date.now()};
+  const payload={protocol:1,device_id:'mac-123456789abc',
+    threads:[{id,source:'Codex',title:'Build dashboard',project:'observer',
+      status:'working',updated_at:Date.now(),events:[],
+      conversation:[one,two],summary:'Testing dashboard',conversation_truncated:true}]};
+  const db=new FakeDB(), localEnv={...env,DB:db};
+  const sync=await worker.fetch(new Request(origin+'/api/agent/sync',{
+    method:'POST', headers:{Authorization:'Bearer '+env.AGENT_TOKEN,
+      'Content-Type':'application/json'},body:JSON.stringify(payload),
+  }),localEnv);
+  assert.equal(sync.status,200);
+  const row=JSON.parse(db.threads.get(id).snapshot);
+  assert.equal(row.conversation.length,2);
+  assert.equal(row.conversation[0].text,'Build a dashboard\nfor Codex');
+  assert.equal(row.conversation[1].output,'Pass\n18 tests');
+  assert.equal(row.conversation_truncated,true);
+  assert.equal(row.summary,'Testing dashboard');
+
+  payload.threads[0].conversation=[{role:'thinking',text:'hidden'}];
+  const bad=await worker.fetch(new Request(origin+'/api/agent/sync',{
+    method:'POST', headers:{Authorization:'Bearer '+env.AGENT_TOKEN,
+      'Content-Type':'application/json'},body:JSON.stringify(payload),
+  }),localEnv);
+  assert.equal(bad.status,400);
+  payload.threads[0].conversation=[{role:'assistant',text:'x'.repeat(20000)}];
+  const tooLong=await worker.fetch(new Request(origin+'/api/agent/sync',{
+    method:'POST', headers:{Authorization:'Bearer '+env.AGENT_TOKEN,
+      'Content-Type':'application/json'},body:JSON.stringify(payload),
+  }),localEnv);
+  // Individual blocks are bounded, never persisted unbounded.
+  assert.equal(tooLong.status,200);
+  assert.ok(JSON.parse(db.threads.get(id).snapshot).conversation[0].text.length<=3600);
 });
 
 test('login CSRF protection, wrong password, cookie and private state',async()=>{
