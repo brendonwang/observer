@@ -115,6 +115,7 @@ class Transcript:
     def __init__(self) -> None:
         self.items: list[dict] = []
         self.tool_ids: dict[str, dict] = {}
+        self.ignored_ids: set[str] = set()
 
     def message(self, role: str, text: str, at: int = 0) -> None:
         text = clip(text, 3500 if role == "assistant" else 2500)
@@ -129,6 +130,8 @@ class Transcript:
     def tool(self, name: str, args: object = None, at: int = 0, call_id: str = "") -> None:
         label, detail = tool_label(name, args)
         if not label:
+            if call_id:
+                self.ignored_ids.add(call_id)
             return
         entry = {"role": "tool", "title": clip(label, 140), "detail": clip(detail, 1100),
                  "output": "", "error": False, "at": at}
@@ -137,6 +140,8 @@ class Transcript:
             self.tool_ids[call_id] = entry
 
     def output(self, value: object, at: int = 0, call_id: str = "", error: bool = False) -> None:
+        if call_id in self.ignored_ids:
+            return
         text = text_or_content(value, 1700)
         if not text:
             return
