@@ -73,7 +73,7 @@ During `python3 agent.py init`, enter any combination of `codex,claude,pi,files`
 - **Codex**: Codex Desktop JSONL sessions and titles. Existing deployments remain compatible.
 - **Claude Code**: Claude Code session JSONL files in `~/.claude/projects`. It detects user turns, assistant messages, tool names, and explicit completion markers. It never uploads thinking blocks or tool arguments.
 - **Pi coding agent**: Reads session JSONL under `~/.pi/agent/sessions`. Pi forks with an explicit `parentSession` appear beneath their parent. Branches within the same Pi session file are not separate tasks.
-- **Subagents**: Codex and Claude Code child sessions are grouped under their parents when explicit lineage is available, rather than cluttering the main thread list. Missing parents leave their children accessible as standalone sessions.
+- **Subagents**: Codex and Claude Code child sessions are grouped under their parents when explicit lineage is available, rather than cluttering the main thread list. Missing parents leave their children accessible as standalone sessions. Codex's internal **Guardian review** approval sessions are automatically hidden instead of being shown as tasks. Older Guardian records are filtered from the dashboard even if already stored in D1.
 - **Custom**: Any job, script, CI process, or AI tool can write a small JSON snapshot to `~/.observer/feeds`. Observer only reads those files.
 
 For custom sources, create `~/.observer/feeds/build.json`:
@@ -161,6 +161,8 @@ This prints exactly what *would* be sent but **does not make any network request
 - Workspace access policies still apply. Do not use the monitor if sending workspace data to an independent cloud service is prohibited.
 
 ## Troubleshooting
+
+**Too many "Guardian review" sessions**: Those are Codex's internal approval reviewers, not individual coding tasks. Update both `agent.py` and the deployed `worker.js`; Observer will stop collecting these sessions and hide existing Guardian records without a database migration. Regular review subagents stay visible under their parents.
 
 **No sessions**: Check `~/.codex/sessions` and try `python3 agent.py dry-run`. Some Codex versions may use different metadata layouts. The parser deliberately treats unknown state as "Unknown" instead of falsely saying completed.
 
