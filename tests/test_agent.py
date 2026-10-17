@@ -205,6 +205,42 @@ class AgentTests(unittest.TestCase):
         self.assertNotIn('PRIVATE TOOL ARG', json.dumps(item))
         self.assertEqual(agent.gather_pi_sessions(root)[0]['final_response'], '')
 
+    def test_guardian_review_metadata_is_suppressed(self):
+        parent = '54f114f4-aaaa-4e12-8888-000000000002'
+        for meta in (
+            {'thread_source': 'guardian_review', 'parent_thread_id': parent,
+             'source': {'subagent': {'other': 'guardian'}}},
+            {'thread_source': 'subagent', 'parent_thread_id': parent,
+             'source': {'subagent': {'other': 'guardian'}}},
+        ):
+            self.write_events(
+                self.row('session_meta', {'type': 'session_meta', **meta}),
+                self.row('event_msg', {'type': 'task_started'}),
+            )
+            self.assertIsNone(agent.parse_session(self.path, {}, content_mode='final'))
+            self.assertEqual(agent.gather_sessions(self.root, self.index), [])
+        self.assertFalse(agent.is_codex_guardian({'thread_source': 'subagent',
+            'source': {'subagent': {'thread_spawn': {'parent_thread_id': parent}}}}))
+
+    def test_guardian_rollouts_do_not_displace_real_threads(self):
+        self.write_events(
+            self.row('session_meta', {'type': 'session_meta', 'cwd': '/tmp/work'}),
+            self.row('event_msg', {'type': 'task_started'}),
+        )
+        # More internal reviewers than the session limit, newer than the user task.
+        old = time.time() - 200
+        os.utime(self.path, (old, old))
+        for i in range(100):
+            child_id = '12345678-1234-1234-1234-%012d' % i
+            child = self.root / ('rollout-new-' + child_id + '.jsonl')
+            child.write_text(json.dumps(self.row('session_meta', {
+                'type': 'session_meta', 'thread_source': 'guardian_review',
+                'parent_thread_id': THREAD_ID,
+                'source': {'subagent': {'other': 'guardian'}},
+            })) + '\n')
+        result = agent.gather_sessions(self.root, self.index, max_sessions=1)
+        self.assertEqual([item['id'] for item in result], [THREAD_ID])
+
     def test_https_required(self):
         with self.assertRaises(ValueError):
             agent.validate_endpoint('http://example.com')
