@@ -18,6 +18,7 @@ The existing `protocol: 1` sync envelope and D1 `threads` table are retained as 
 
 ## Components
 
+- `conversation.py`: bounded extraction of explicitly opted-in agent messages, tool labels, and short output previews. No raw reasoning is uploaded.
 - `agent.py`: Python 3.9+ standard-library watcher. It reads specific supported session directories, custom JSON feeds and explicitly registered services.
 - `service_adapter.py`: optional HEAD checks with a 3s timeout. It does not follow redirects or download bodies.
 - `bin/observer.js`: local CLI for commands, services, and lifecycle operations. `observer run` executes only locally, writes a private activity file and forwards stdout/stderr directly to the terminal.
@@ -48,3 +49,7 @@ New automated deployments include a daily Worker Cron Trigger. Its scheduled han
 - Status classification for some agent formats is heuristic.
 - One shared ingestion token for now, with per-device revocation planned.
 - The cloud dashboard shows a bounded recent-activity window; history pagination is planned.
+
+## Opt-in conversation replay
+
+In `transcript` mode, the local watcher builds bounded structured conversation entries (visible user/assistant messages, tool descriptions and short output previews). `worker_source.js` validates roles, sizes and character budgets before storage. The project detail sheet renders only text nodes and safe links, grouping tool entries in collapsible steps. This is disabled by default, as tool output previews may contain sensitive material. Session reasoning content is excluded by the source parser.
