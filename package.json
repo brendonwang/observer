@@ -30,6 +30,7 @@
   "files": [
     "bin/",
     "agent.py",
+    "conversation.py",
     "service_adapter.py",
     "worker.js",
     "schema.sql",
