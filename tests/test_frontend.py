@@ -41,6 +41,7 @@ class FrontendTests(unittest.TestCase):
         self.assertIn('body.detail-open .main-head,body.detail-open .list-panel{display:none}', self.site)
         self.assertIn('prefers-reduced-motion:reduce', self.site)
         self.assertIn('aria-label="Search threads"', self.site)
+        self.assertIn('id="source-filter"', self.site)
         self.assertIn("window.addEventListener('popstate'", self.site)
 
     def test_no_clutter_or_external_dependencies(self):
@@ -53,7 +54,7 @@ class FrontendTests(unittest.TestCase):
         self.assertNotIn('thread-count', self.site)
 
     def test_worker_bundles_current_frontend(self):
-        self.assertIn('Codex thread monitor', self.worker)
+        self.assertIn('Private activity monitor', self.worker)
         self.assertIn('No response synced', self.worker)
 
 
