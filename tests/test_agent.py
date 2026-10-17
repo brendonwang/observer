@@ -97,6 +97,73 @@ class AgentTests(unittest.TestCase):
         screenshot.symlink_to(self.index)
         self.assertIsNone(agent.preview_file(images, THREAD_ID))
 
+    def test_claude_completed_and_reasoning_hidden(self):
+        claude = self.dir / 'claude'
+        project = claude / 'sample-project'
+        project.mkdir(parents=True)
+        path = project / (THREAD_ID + '.jsonl')
+        def message(typ, content, **extra):
+            return {
+                'type': typ, 'timestamp': '2026-10-16T21:10:00Z',
+                'cwd': '/Users/abc/demo-app', 'message': {'content': content, **extra},
+            }
+        path.write_text('\n'.join(json.dumps(item) for item in [
+            {'type': 'user', 'timestamp': '2026-10-16T21:09:00Z', 'message': {'content': 'SECRET PROMPT'}},
+            message('assistant', [
+                {'type': 'thinking', 'thinking': 'SECRET REASONING'},
+                {'type': 'tool_use', 'name': 'Read', 'input': {'secret': 'PRIVATE ARGUMENT'}},
+                {'type': 'text', 'text': 'Finished setup'},
+            ], stop_reason='end_turn'),
+        ]) + '\n')
+        result = agent.gather_claude_sessions(claude, content_mode='final')
+        self.assertEqual(len(result), 1)
+        item = result[0]
+        self.assertEqual(item['source'], 'Claude Code')
+        self.assertEqual(item['status'], 'completed')
+        self.assertEqual(item['project'], 'demo-app')
+        self.assertEqual(item['final_response'], 'Finished setup')
+        self.assertIn('Tool: Read', json.dumps(item))
+        for secret in ('SECRET PROMPT', 'SECRET REASONING', 'PRIVATE ARGUMENT'):
+            self.assertNotIn(secret, json.dumps(item))
+
+    def test_custom_file_feed_and_opt_in(self):
+        root = self.dir / 'feeds'
+        root.mkdir()
+        file = root / 'deploy.json'
+        file.write_text(json.dumps({
+            'id': 'deploy-1', 'source': 'CI', 'title': 'Deploy', 'status': 'completed',
+            'project': 'web', 'final_response': 'Build passed',
+            'events': [{'kind': 'complete', 'label': 'Finished'}],
+        }))
+        self.assertEqual(agent.gather_feeds(root)[0]['final_response'], '')
+        result = agent.gather_feeds(root, content_mode='final')[0]
+        self.assertEqual(result['source'], 'CI')
+        self.assertEqual(result['final_response'], 'Build passed')
+        self.assertEqual(result['status'], 'completed')
+        file.unlink()
+        file.symlink_to(self.index)
+        self.assertEqual(agent.gather_feeds(root), [])
+
+    def test_sources_can_be_combined_and_are_validated(self):
+        cfg = {'device_id': 'mac-' + '3' * 12, 'content_mode': 'metadata',
+               'sources': [
+                   {'type': 'codex', 'path': str(self.root), 'index': str(self.index)},
+                   {'type': 'claude', 'path': str(self.dir / 'missing')},
+                   {'type': 'files', 'path': str(self.dir / 'missing-feeds')},
+               ]}
+        self.write_events(self.row('event_msg', {'type': 'task_started'}))
+        result = agent.configured_sessions(cfg)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]['source'], 'Codex')
+        config = self.dir / 'multi-config.json'
+        cfg.update({'endpoint': 'https://abc.workers.dev', 'agent_token': 'x' * 40})
+        agent.write_config(cfg, config)
+        self.assertEqual(len(agent.read_config(config)['sources']), 3)
+        cfg['sources'].append({'type': 'unknown'})
+        agent.write_config(cfg, config)
+        with self.assertRaises(ValueError):
+            agent.read_config(config)
+
     def test_https_required(self):
         with self.assertRaises(ValueError):
             agent.validate_endpoint('http://example.com')
