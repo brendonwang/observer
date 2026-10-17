@@ -41,7 +41,7 @@ async def preview_checks(browser):
     assert await page.locator('.disclosure').evaluate('(e) => e.open')
     assert not errors, errors
     await page.screenshot(path=str(SHOT_DIR / 'observer-reviewed-mobile-detail.png'))
-    await page.locator('.mobile-back').click()
+    await page.locator('.mobile-back:not(.parent-link)').click()
     await page.wait_for_timeout(150)
     assert await page.locator('.list-panel').is_visible()
     assert not errors, errors
