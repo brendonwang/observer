@@ -89,7 +89,7 @@ def gather_services(config=CONFIG, max_services=10, content_mode="metadata"):
             activity = monitor_service(item)
         except (OSError, ValueError):
             continue
-        if content_mode != "final":
+        if content_mode not in ("final", "transcript"):
             activity["final_response"] = ""
         results.append(activity)
     return results
