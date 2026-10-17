@@ -1,0 +1,19 @@
+# Local secrets and deploy state
+.env
+.env.*
+.dev.vars
+.dev.vars.*
+config.json
+.codex-monitor/
+.wrangler/
+node_modules/
+
+# Generated files
+__pycache__/
+*.pyc
+.DS_Store
+*.log
+*.db
+*.sqlite
+screenshots/
+previews/

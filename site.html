@@ -1,0 +1,672 @@
+<!doctype html>
+<html lang="en" data-demo="false">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fafaf8">
+<meta name="color-scheme" content="light">
+<meta name="description" content="Codex thread monitor">
+<title>Observer</title>
+<style nonce="__NONCE__">
+:root{--bg:#fafaf8;--ink:#252724;--muted:#777b75;--line:#e6e8e3;--hover:#f3f4f0;--selected:#eff1ed;--green:#39775a;--red:#9f5a51;--sans:"SF Pro Display","Helvetica Neue",-apple-system,BlinkMacSystemFont,Arial,sans-serif;--serif:Georgia,"Times New Roman",serif}
+*,*::before,*::after{box-sizing:border-box}
+html{background:var(--bg);-webkit-text-size-adjust:100%}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font:14px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
+button,input{font:inherit}button{cursor:pointer}button:disabled{cursor:default;opacity:.5}
+button:focus-visible,input:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var(--green);outline-offset:3px}
+button:active:not(:disabled){transform:translateY(1px)}
+a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
+[hidden]{display:none!important}::selection{background:#e3ece3}
+.shell{max-width:1136px;padding:0 clamp(22px,4.5vw,54px) 45px;margin:auto}
+.topbar{height:70px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:16px}
+.brand{font-size:19px;font-weight:700;letter-spacing:-.072em}.brand span{color:var(--green)}
+.top-actions{display:flex;align-items:center;gap:22px}
+.connection{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;font-size:12px;color:var(--muted)}
+.signal{height:7px;width:7px;border-radius:50%;background:var(--green);flex-shrink:0}.signal.off{background:#b2a8a3}
+.action{border:0;background:none;color:var(--muted);font-size:12px;padding:8px 0;min-height:40px}
+.action:hover{color:var(--ink)}.action svg{height:15px;width:15px;display:block}
+.main-head{padding:45px 0 29px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:20px}
+.main-head h1{font:400 43px/1 var(--serif);letter-spacing:-.055em;margin:0}
+
+.workspace{display:grid;grid-template-columns:minmax(0,.89fr) minmax(0,1.11fr);min-height:520px}
+.list-panel{min-width:0;border-right:1px solid var(--line);padding:25px 28px 32px 0}
+.search{height:42px;display:flex;align-items:center;border-bottom:1px solid var(--line);padding:0 2px;background:transparent}
+.search:focus-within{border-color:#819c87}
+.search input{border:0;outline:0;background:none;min-width:0;width:100%;font-size:13px;color:var(--ink)}.search input::placeholder{color:#9a9f99}
+.filters{display:flex;gap:24px;padding:9px 0 0;border-bottom:1px solid var(--line)}
+.filter{position:relative;color:var(--muted);border:0;background:none;font-size:12px;padding:10px 0 13px;min-height:43px}
+.filter:hover,.filter.active{color:var(--ink)}.filter.active{font-weight:650}.filter.active::after{content:"";position:absolute;bottom:-1px;left:0;right:0;height:2px;background:var(--ink)}
+.thread{position:relative;display:block;text-align:left;width:100%;background:none;border:0;border-bottom:1px solid var(--line);padding:19px 12px 17px;color:var(--ink);transition:background .18s}
+.thread:hover{background:var(--hover)}.thread.selected{background:var(--selected)}.thread.selected:before{content:"";position:absolute;left:0;top:16px;bottom:16px;width:2px;background:var(--green)}
+.thread-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.thread-title{font-weight:630;font-size:14px;letter-spacing:-.02em;line-height:1.4;overflow-wrap:anywhere}
+.thread-meta{display:flex;gap:8px;align-items:center;min-width:0;font-size:12px;color:var(--muted);margin-top:9px}
+.project{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:64%}
+.status{font-size:11px;font-weight:550;color:var(--muted);white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
+.status:before{content:"";background:#aeb2ac;width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.status.working{color:var(--green)}.status.working:before{background:var(--green)}.status.interrupted{color:var(--red)}.status.interrupted:before{background:var(--red)}
+.detail{min-width:0;padding:28px 0 46px 35px}
+.detail-header{padding:0 0 26px;border-bottom:1px solid var(--line)}
+.detail-title{font:400 clamp(23px,2.6vw,30px)/1.18 var(--serif);letter-spacing:-.04em;overflow-wrap:anywhere;margin:0 0 15px}
+.detail-meta{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+.section{padding:27px 0;border-bottom:1px solid var(--line)}
+.section h3{font-size:13px;letter-spacing:-.01em;font-weight:650;margin:0 0 17px}
+.response{white-space:pre-wrap;overflow-wrap:anywhere;max-height:560px;overflow:auto;font-size:13px;line-height:1.85;color:#454943}
+.response a{color:#2a6b4b}.muted{color:var(--muted)}
+.last-event{font-size:13px;line-height:1.65;color:var(--muted)}
+.last-event strong{color:var(--ink);font-weight:550}
+.preview{display:block;max-width:100%;width:auto;max-height:440px;object-fit:contain;border:1px solid var(--line);border-radius:5px;background:#fff}
+.preview-link{font-size:12px;color:var(--green);text-decoration:none}.section-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.disclosure{border-bottom:1px solid var(--line)}
+.disclosure summary{padding:22px 0;list-style:none;display:flex;justify-content:space-between;align-items:center;cursor:pointer;font-size:13px;font-weight:650}
+.disclosure summary::-webkit-details-marker{display:none}.disclosure summary span{font-size:12px;font-weight:450;color:var(--muted)}
+.timeline{margin:0;padding:0 0 16px;list-style:none}
+.timeline li{display:flex;justify-content:space-between;gap:14px;padding:10px 0;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+.timeline li:first-child{border-top:0}.timeline .event-label{overflow-wrap:anywhere}.timeline time{flex:none;color:#9ca19a;font-size:11px}
+.advanced{display:flex;justify-content:flex-end;padding:11px 0 6px}
+.copy-id{padding:7px 0;border:0;background:none;color:var(--muted);font-size:11px}.copy-id:hover{color:var(--ink)}
+.empty{padding:50px 8px;font-size:13px;color:var(--muted)}.detail-empty{padding:90px 15px;text-align:center;color:var(--muted);font-size:13px}
+.mobile-back{display:none}.notice{margin:16px 0 0;font-size:12px;color:#9a6b37}
+.auth-screen{display:none;min-height:100vh;align-items:center;justify-content:center;padding:35px 22px}.auth-screen.show{display:flex}
+.auth-card{width:100%;max-width:340px}.auth-card .brand{margin-bottom:54px;display:block}
+.auth-card h1{font:400 37px/1.08 var(--serif);letter-spacing:-.05em;margin:0 0 29px}
+.field-label{font-size:12px;font-weight:600;display:block;margin-bottom:8px}
+.password{width:100%;height:46px;background:#fff;border:1px solid #d9ded7;border-radius:5px;padding:0 12px;outline:0}
+.password:focus{border-color:var(--green)}.primary{width:100%;margin-top:14px;height:46px;border:0;background:var(--ink);border-radius:5px;color:white;font-size:13px;font-weight:600}.primary:hover{background:#424841}
+.auth-error{min-height:17px;color:var(--red);font-size:12px;margin-top:12px}
+.skip{position:absolute;left:-9999px;top:0}.skip:focus{left:12px;top:12px;padding:9px;background:white;z-index:10}
+@media(max-width:760px){
+  .shell{padding:0 23px 32px}.topbar{height:64px}.top-actions{gap:16px}
+  .main-head{padding:38px 0 27px}.main-head h1{font-size:40px}
+  .workspace{display:block}.list-panel{border-right:0;padding:23px 0 20px}
+  .detail{border-top:0;padding:25px 0 40px}.mobile-back{display:block;background:none;border:0;color:var(--green);font-size:13px;font-weight:600;padding:0 0 24px}
+  body:not(.detail-open) .detail{display:none}body.detail-open .main-head,body.detail-open .list-panel{display:none}
+  body.detail-open .detail{padding-top:29px}
+  .thread{padding:19px 9px}.thread.selected{background:none}.thread.selected:before{display:none}
+  .detail-title{font-size:29px}.section{padding:25px 0}
+}
+@media(max-width:400px){.connection{font-size:11px}.top-actions{gap:13px}.action{font-size:11px}.main-head h1{font-size:38px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;scroll-behavior:auto!important;animation:none!important}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to threads</a>
+<div class="auth-screen show" id="auth-screen">
+  <div class="auth-card">
+    <div class="brand">observer<span>.</span></div>
+    <h1>Sign in</h1>
+    <form id="auth-form">
+      <label class="field-label" for="password">Password</label>
+      <input class="password" id="password" type="password" autocomplete="current-password" required>
+      <button class="primary" id="login-button" type="submit">Continue</button>
+      <div class="auth-error" id="auth-error" role="alert"></div>
+    </form>
+  </div>
+</div>
+<div class="shell" id="app-shell" hidden>
+  <header class="topbar">
+    <div class="brand">observer<span>.</span></div>
+    <div class="top-actions">
+      <div class="connection" role="status"><span class="signal" id="connection-dot"></span><span id="connection-text">Connecting</span></div>
+      <button class="action" id="refresh" aria-label="Refresh" title="Refresh"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M20 11a8 8 0 1 0-2 6M20 4v7h-7"/></svg></button>
+      <button class="action" id="logout">Sign out</button>
+    </div>
+  </header>
+  <main id="main">
+    <div class="main-head"><h1>Threads</h1></div>
+    <p id="error-notice" class="notice" role="status" hidden></p>
+    <div class="workspace">
+      <section class="list-panel" aria-label="Threads">
+        <label class="search"><input type="search" id="search" aria-label="Search threads" placeholder="Search threads"></label>
+        <div class="filters" role="group" aria-label="Filter threads"><button class="filter active" type="button" data-filter="all" aria-pressed="true">All</button><button class="filter" type="button" data-filter="working" aria-pressed="false">Running</button><button class="filter" type="button" data-filter="completed" aria-pressed="false">Done</button></div>
+        <div id="session-list"></div>
+      </section>
+      <section class="detail" id="detail" aria-label="Thread details"></section>
+    </div>
+  </main>
+</div>
+<script nonce="__NONCE__">
+(function () {
+  'use strict';
+
+  const demo = document.documentElement.dataset.demo === 'true';
+  const sampleTime = Date.now();
+  const $ = id => document.getElementById(id);
+  const mobile = () => matchMedia('(max-width: 760px)').matches;
+  const element = (tag, className = '', value) => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (value !== undefined) node.textContent = value;
+    return node;
+  };
+
+  let state = {threads: [], devices: []};
+  let selected = null;
+  let filter = 'all';
+  let term = '';
+  let listKey = '';
+  let initialized = false;
+  let loggedIn = false;
+  let refreshing = false;
+  let queuedRefresh = false;
+  let authEpoch = 0;
+  let listPosition = 0;
+
+  function ago(value) {
+    const timestamp = Number(value);
+    if (!Number.isFinite(timestamp) || timestamp <= 0) return '';
+    const elapsed = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+    if (elapsed < 60) return 'now';
+    if (elapsed < 3600) return Math.floor(elapsed / 60) + 'm ago';
+    if (elapsed < 86400) return Math.floor(elapsed / 3600) + 'h ago';
+    return Math.floor(elapsed / 86400) + 'd ago';
+  }
+
+  function when(timestamp) {
+    const node = element('time');
+    node.dataset.ms = String(timestamp || 0);
+    updateTime(node);
+    return node;
+  }
+
+  function updateTime(node) {
+    const timestamp = Number(node.dataset.ms);
+    node.textContent = ago(timestamp) || '-';
+    const date = new Date(timestamp);
+    if (timestamp > 0 && Number.isFinite(date.getTime())) node.dateTime = date.toISOString();
+    else node.removeAttribute('datetime');
+  }
+
+  function refreshRelativeTimes() {
+    document.querySelectorAll('time[data-ms]').forEach(updateTime);
+  }
+
+  function clockTime(timestamp) {
+    const date = new Date(Number(timestamp));
+    return Number.isFinite(date.getTime()) ? date.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'}) : '';
+  }
+
+  function online() {
+    return demo || state.devices.some(device => {
+      const updated = Number(device.last_seen_at);
+      return Number.isFinite(updated) && Date.now() - updated < 120000;
+    });
+  }
+
+  function statusOf(thread) {
+    if (thread.status === 'working' && !demo && (!online() || Date.now() - thread.updated_at > 180000)) return 'quiet';
+    return thread.status || 'unknown';
+  }
+
+  function statusName(status) {
+    return ({working: 'Running', completed: 'Done', quiet: 'Idle', interrupted: 'Stopped', unknown: 'Unknown'})[status] || 'Unknown';
+  }
+
+  function setStatus(node, status) {
+    node.classList.remove('working', 'completed', 'quiet', 'interrupted', 'unknown');
+    node.classList.add('status', status);
+    node.textContent = statusName(status);
+  }
+
+  function filteredThreads() {
+    return state.threads.filter(thread => {
+      const matchesStatus = filter === 'all' || statusOf(thread) === filter;
+      return matchesStatus && (String(thread.title || '') + ' ' + String(thread.project || '')).toLowerCase().includes(term);
+    });
+  }
+
+  function humanEvent(event) {
+    const label = String(event.label || '');
+    if (event.kind === 'complete') return 'Finished';
+    if (event.kind === 'start') return 'Started';
+    if (event.kind === 'warning') return /approval/i.test(label) ? 'Approval needed' : 'Interrupted';
+    if (event.kind === 'thought') return 'Thinking';
+    if (event.kind === 'message') return 'Responded';
+    if (event.kind === 'tool') {
+      const tool = label.replace(/^Tool:\s*/i, '').toLowerCase();
+      if (/apply_patch|edit_file|write_file/.test(tool)) return 'Editing files';
+      if (/shell_command|exec_command|terminal|command/.test(tool)) return 'Running command';
+      if (/read_file|search|grep|list/.test(tool)) return 'Reading files';
+      return tool ? 'Using ' + tool : 'Using tool';
+    }
+    return label || 'Activity';
+  }
+
+  function appendLinks(node, text) {
+    const pattern = /\[([^\]\n]{1,100})\]\((https:\/\/[^\s<>)]+)\)|(https:\/\/[^\s<>"']+)/g;
+    let last = 0;
+    let match;
+    while ((match = pattern.exec(text))) {
+      node.append(document.createTextNode(text.slice(last, match.index)));
+      const markdownLink = Boolean(match[2]);
+      const raw = markdownLink ? match[2] : match[3];
+      const url = markdownLink ? raw : raw.replace(/[.,;:)\]]+$/, '');
+      try {
+        const safe = new URL(url);
+        if (safe.protocol === 'https:') {
+          const anchor = element('a', '', markdownLink ? match[1] : url);
+          anchor.href = safe.href;
+          anchor.target = '_blank';
+          anchor.rel = 'noopener noreferrer';
+          node.append(anchor);
+        } else node.append(document.createTextNode(markdownLink ? match[0] : url));
+      } catch (_) {
+        node.append(document.createTextNode(markdownLink ? match[0] : url));
+      }
+      last = match.index + (markdownLink ? match[0].length : url.length);
+      pattern.lastIndex = last;
+    }
+    node.append(document.createTextNode(text.slice(last)));
+  }
+
+  function showAuth(isLoggedIn) {
+    loggedIn = isLoggedIn;
+    $('auth-screen').classList.toggle('show', !isLoggedIn);
+    $('app-shell').hidden = !isLoggedIn;
+    if (!isLoggedIn) $('password').focus();
+  }
+
+  function clearSession() {
+    state = {threads: [], devices: []};
+    selected = null;
+    initialized = false;
+    listKey = '';
+    $('detail').replaceChildren();
+    $('detail').removeAttribute('data-thread-id');
+    document.body.classList.remove('detail-open');
+    history.replaceState(null, '', location.pathname + location.search);
+    showAuth(false);
+  }
+
+  function demoState() {
+    const t = seconds => sampleTime - seconds * 1000;
+    return {
+      devices: [{id: 'demo', last_seen_at: Date.now() - 9000}],
+      threads: [
+        {id: '3b9aa460-78e9-4e8f-a693-fd91d0000001', title: 'Redesign the developer dashboard', project: 'frontend-app', status: 'working', updated_at: t(17), events: [{at: t(238), kind: 'start', label: 'Codex started a turn'}, {at: t(145), kind: 'tool', label: 'Tool: shell_command'}, {at: t(63), kind: 'message', label: 'Assistant response updated'}, {at: t(17), kind: 'tool', label: 'Tool: apply_patch'}], final_response: '', has_preview: false},
+        {id: '3b9aa460-78e9-4e8f-a693-fd91d0000002', title: 'Implement authentication flow', project: 'api-service', status: 'completed', updated_at: t(1020), events: [{at: t(1470), kind: 'tool', label: 'Tool: apply_patch'}, {at: t(1030), kind: 'message', label: 'Codex posted a response'}, {at: t(1020), kind: 'complete', label: 'Turn completed'}], final_response: 'Implemented authentication and session handling.\n\nAll 12 tests passed.\n\nhttps://example.com', has_preview: false},
+        {id: '3b9aa460-78e9-4e8f-a693-fd91d0000003', title: 'Optimize model inference', project: 'knee-mri', status: 'quiet', updated_at: t(385), events: [{at: t(425), kind: 'start', label: 'Codex started a turn'}, {at: t(385), kind: 'tool', label: 'Tool: shell_command'}], final_response: '', has_preview: false},
+        {id: '3b9aa460-78e9-4e8f-a693-fd91d0000004', title: 'Fix persistent segment tree edge case', project: 'cp-solutions', status: 'completed', updated_at: t(20000), events: [{at: t(20000), kind: 'complete', label: 'Turn completed'}], final_response: 'Fixed the empty-range query. Tests pass.', has_preview: false},
+      ],
+    };
+  }
+
+  async function api(path, options = {}) {
+    if (demo) return path === '/api/state' ? demoState() : {ok: true};
+    const response = await fetch(path, {credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, ...options});
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(data.error || 'Request failed');
+      error.status = response.status;
+      throw error;
+    }
+    return data;
+  }
+
+  function setNotice(message) {
+    $('error-notice').textContent = message;
+    $('error-notice').hidden = !message;
+  }
+
+  function renderHeader() {
+    $('connection-dot').classList.toggle('off', !online());
+    $('connection-text').textContent = demo ? 'Demo' : online() ? 'Live' : state.devices.length ? 'Offline' : 'Waiting';
+  }
+
+  function alignSelection() {
+    const visible = filteredThreads();
+    if (!visible.some(thread => thread.id === selected)) selected = visible[0]?.id || null;
+    if (!mobile() && initialized) {
+      const url = selected ? '#thread=' + encodeURIComponent(selected) : location.pathname + location.search;
+      history.replaceState(null, '', url);
+    }
+  }
+
+  function renderList() {
+    const threads = filteredThreads();
+    const key = JSON.stringify([threads.map(thread => [thread.id, thread.title, thread.project, thread.updated_at, statusOf(thread)]), selected, filter, term]);
+    if (listKey === key) return;
+    listKey = key;
+    const list = $('session-list');
+    const focused = document.activeElement?.dataset.threadId;
+    list.replaceChildren();
+    if (!threads.length) {
+      list.append(element('div', 'empty', state.threads.length ? 'No matches' : 'No threads'));
+      return;
+    }
+    for (const thread of threads) {
+      const button = element('button', 'thread' + (thread.id === selected ? ' selected' : ''));
+      button.type = 'button';
+      button.dataset.threadId = thread.id;
+      button.setAttribute('aria-pressed', String(thread.id === selected));
+      const header = element('div', 'thread-top');
+      const badge = element('span');
+      setStatus(badge, statusOf(thread));
+      header.append(element('span', 'thread-title', thread.title), badge);
+      const meta = element('div', 'thread-meta');
+      if (thread.project && thread.project !== 'Unknown project') {
+        meta.append(element('span', 'project', thread.project), element('span', '', '\u00b7'));
+      }
+      meta.append(when(thread.updated_at));
+      button.append(header, meta);
+      button.addEventListener('click', () => openThread(thread.id));
+      list.append(button);
+    }
+    const focus = [...list.querySelectorAll('.thread')].find(node => node.dataset.threadId === focused);
+    if (focus) focus.focus({preventScroll: true});
+  }
+
+  function buildDetail(thread) {
+    const root = $('detail');
+    root.dataset.threadId = thread.id;
+    root.replaceChildren();
+
+    const back = element('button', 'mobile-back', '\u2190 Threads');
+    back.type = 'button';
+    back.addEventListener('click', closeThread);
+    root.append(back);
+
+    const header = element('header', 'detail-header');
+    const title = element('h2', 'detail-title');
+    const meta = element('div', 'detail-meta');
+    const badge = element('span', 'status detail-status');
+    const project = element('span', 'detail-project');
+    const time = when(0);
+    meta.append(badge, project, time);
+    header.append(title, meta);
+    root.append(header);
+
+    const result = element('section', 'section result-section');
+    result.append(element('h3', 'result-title', 'Result'), element('div', 'response'), element('div', 'last-event'));
+    root.append(result);
+
+    const preview = element('section', 'section preview-section');
+    const previewHeader = element('div', 'section-head');
+    const previewLink = element('a', 'preview-link', 'Open');
+    previewLink.target = '_blank';
+    previewLink.rel = 'noopener noreferrer';
+    previewHeader.append(element('h3', '', 'Preview'), previewLink);
+    const image = element('img', 'preview');
+    image.alt = 'Project preview';
+    image.loading = 'lazy';
+    image.addEventListener('error', () => {
+      image.hidden = true;
+      previewLink.hidden = true;
+      preview.append(element('div', 'muted preview-error', 'Preview unavailable'));
+    });
+    preview.append(previewHeader, image);
+    preview.hidden = true;
+    root.append(preview);
+
+    const details = element('details', 'disclosure');
+    const summary = element('summary', '', 'Activity');
+    const toggle = element('span', '', 'Show');
+    summary.append(toggle);
+    details.addEventListener('toggle', () => {toggle.textContent = details.open ? 'Hide' : 'Show';});
+    details.append(summary);
+    details.append(element('ol', 'timeline'));
+    const advanced = element('div', 'advanced');
+    const copy = element('button', 'copy-id', 'Copy ID');
+    copy.type = 'button';
+    copy.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(thread.id);
+        copy.textContent = 'Copied';
+      } catch (_) {
+        copy.textContent = thread.id;
+      }
+    });
+    advanced.append(copy);
+    details.append(advanced);
+    root.append(details);
+  }
+
+  function renderDetail() {
+    const root = $('detail');
+    const thread = state.threads.find(entry => entry.id === selected);
+    if (!thread) {
+      if (root.dataset.threadId !== 'empty') {
+        root.replaceChildren(element('div', 'detail-empty', 'Select a thread'));
+        root.dataset.threadId = 'empty';
+      }
+      return;
+    }
+    if (root.dataset.threadId !== thread.id) buildDetail(thread);
+    const status = statusOf(thread);
+    const title = root.querySelector('.detail-title');
+    if (title.textContent !== thread.title) title.textContent = thread.title;
+    setStatus(root.querySelector('.detail-status'), status);
+    const project = root.querySelector('.detail-project');
+    project.textContent = thread.project && thread.project !== 'Unknown project' ? thread.project : '';
+    project.hidden = !project.textContent;
+    const time = root.querySelector('.detail-meta time');
+    time.dataset.ms = String(thread.updated_at || 0);
+    updateTime(time);
+
+    const response = root.querySelector('.response');
+    const heading = root.querySelector('.result-title');
+    const latest = root.querySelector('.last-event');
+    if (thread.final_response) {
+      heading.hidden = false;
+      response.hidden = false;
+      latest.hidden = true;
+      if (response.dataset.content !== thread.final_response) {
+        const oldScroll = response.scrollTop;
+        response.replaceChildren();
+        appendLinks(response, thread.final_response);
+        response.dataset.content = thread.final_response;
+        response.scrollTop = oldScroll;
+      }
+    } else {
+      heading.hidden = true;
+      response.hidden = true;
+      latest.hidden = false;
+      const last = thread.events?.at(-1);
+      latest.textContent = status === 'completed' ? 'No response synced' : last ? humanEvent(last) : 'No activity';
+    }
+
+    const preview = root.querySelector('.preview-section');
+    const image = preview.querySelector('img');
+    const link = preview.querySelector('a');
+    preview.hidden = !thread.has_preview;
+    if (thread.has_preview) {
+      const url = '/api/preview?id=' + encodeURIComponent(thread.id) + '&v=' + (thread.preview_updated_at || 0);
+      if (image.dataset.url !== url) {
+        image.dataset.url = url;
+        preview.querySelector('.preview-error')?.remove();
+        image.hidden = false;
+        link.hidden = false;
+        image.src = url;
+        link.href = url;
+      }
+    }
+
+    const details = root.querySelector('.disclosure');
+    const events = (thread.events || []).slice(-12).reverse();
+    details.hidden = !events.length;
+    const timeline = details.querySelector('.timeline');
+    const key = JSON.stringify(events);
+    if (timeline.dataset.key !== key) {
+      timeline.dataset.key = key;
+      timeline.replaceChildren();
+      for (const event of events) {
+        const item = element('li');
+        item.append(element('span', 'event-label', humanEvent(event)), element('time', '', clockTime(event.at)));
+        timeline.append(item);
+      }
+    }
+  }
+
+  function render() {
+    if (!loggedIn) return;
+    renderHeader();
+    renderList();
+    renderDetail();
+    refreshRelativeTimes();
+  }
+
+  function hashThread() {
+    if (!location.hash.startsWith('#thread=')) return null;
+    try {return decodeURIComponent(location.hash.slice(8));}
+    catch (_) {return null;}
+  }
+
+  function openThread(id) {
+    if (!state.threads.some(thread => thread.id === id)) return;
+    const openingMobile = mobile();
+    if (openingMobile && !document.body.classList.contains('detail-open')) listPosition = window.scrollY;
+    selected = id;
+    if (openingMobile) {
+      document.body.classList.add('detail-open');
+      history.pushState({observerView: 'detail'}, '', '#thread=' + encodeURIComponent(id));
+    } else {
+      history.replaceState(null, '', '#thread=' + encodeURIComponent(id));
+    }
+    listKey = '';
+    render();
+    if (openingMobile) window.scrollTo(0, 0);
+  }
+
+  function closeThread() {
+    if (mobile() && history.state?.observerView === 'detail') {
+      history.back();
+      return;
+    }
+    history.replaceState(null, '', location.pathname + location.search);
+    document.body.classList.remove('detail-open');
+    window.scrollTo(0, listPosition);
+  }
+
+  function applyNavigation() {
+    const id = hashThread();
+    if (id && state.threads.some(thread => thread.id === id)) {
+      selected = id;
+      document.body.classList.toggle('detail-open', mobile());
+    } else {
+      document.body.classList.remove('detail-open');
+      alignSelection();
+    }
+    listKey = '';
+    render();
+    if (!document.body.classList.contains('detail-open')) window.scrollTo(0, listPosition);
+  }
+
+  function syncSelection() {
+    if (!initialized) {
+      initialized = true;
+      const hashId = hashThread();
+      if (hashId && state.threads.some(thread => thread.id === hashId)) {
+        selected = hashId;
+        document.body.classList.toggle('detail-open', mobile());
+      }
+    }
+    alignSelection();
+    if (!selected) {
+      document.body.classList.remove('detail-open');
+      if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+    }
+  }
+
+  async function refresh() {
+    if (refreshing) {queuedRefresh = true; return;}
+    refreshing = true;
+    const epoch = authEpoch;
+    try {
+      const next = await api('/api/state');
+      if (epoch !== authEpoch) return;
+      state = next;
+      syncSelection();
+      showAuth(true);
+      setNotice('');
+      render();
+    } catch (error) {
+      if (epoch !== authEpoch) return;
+      if (error.status === 401) {
+        clearSession();
+      } else if (loggedIn) {
+        setNotice("Couldn't update. Try again.");
+      } else {
+        $('auth-error').textContent = "Couldn't connect. Try again.";
+        showAuth(false);
+      }
+    } finally {
+      refreshing = false;
+      if (queuedRefresh) {
+        queuedRefresh = false;
+        void refresh();
+      }
+    }
+  }
+
+  $('auth-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const button = $('login-button');
+    button.disabled = true;
+    $('auth-error').textContent = '';
+    try {
+      await api('/api/login', {method: 'POST', body: JSON.stringify({password: $('password').value})});
+      $('password').value = '';
+      authEpoch++;
+      showAuth(true);
+      await refresh();
+    } catch (error) {
+      $('auth-error').textContent = error.status === 401 ? 'Incorrect password' : error.message;
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  $('logout').addEventListener('click', async () => {
+    $('logout').disabled = true;
+    try {
+      await api('/api/logout', {method: 'POST', body: '{}'});
+      authEpoch++;
+      clearSession();
+    } catch (error) {
+      if (error.status === 401) {
+        authEpoch++;
+        clearSession();
+      } else setNotice("Couldn't sign out. Try again.");
+    } finally {
+      $('logout').disabled = false;
+    }
+  });
+
+  $('refresh').addEventListener('click', refresh);
+  $('search').addEventListener('input', event => {
+    term = event.target.value.trim().toLowerCase();
+    alignSelection();
+    listKey = '';
+    render();
+  });
+  document.querySelectorAll('.filter').forEach(button => {
+    button.addEventListener('click', () => {
+      filter = button.dataset.filter;
+      document.querySelectorAll('.filter').forEach(item => {
+        item.classList.toggle('active', item === button);
+        item.setAttribute('aria-pressed', String(item === button));
+      });
+      alignSelection();
+      listKey = '';
+      render();
+    });
+  });
+
+  window.addEventListener('popstate', applyNavigation);
+  window.addEventListener('resize', () => {
+    if (!loggedIn) return;
+    if (!mobile()) document.body.classList.remove('detail-open');
+    else if (hashThread() && state.threads.some(thread => thread.id === hashThread())) document.body.classList.add('detail-open');
+  });
+  document.addEventListener('visibilitychange', () => {if (!document.hidden) void refresh();});
+  setInterval(() => {if (!document.hidden) void refresh();}, 12000);
+  setInterval(() => {if (!document.hidden && loggedIn) render();}, 20000);
+  if (demo) {
+    $('logout').hidden = true;
+    showAuth(true);
+  } else showAuth(false);
+  void refresh();
+})();
+</script>
+</body>
+</html>
