@@ -2,13 +2,13 @@
 
 A private, read-only activity dashboard for Codex Desktop, Claude Code, Pi coding agent, and custom JSON feeds. The local agent uses only Python's standard library; the hosted dashboard runs on Cloudflare Workers.
 
-Monitor multiple sources in one place, with per-source filtering, current status, activity, optional completed responses, and approved screenshots. Observer never executes local commands or remotely controls a source.
+Monitor multiple sources in one place, with per-source filtering, current status, activity, opt-in conversation replay, optional completed responses, and approved screenshots. Observer never executes local commands or remotely controls a source.
 
-> **Privacy:** Session metadata is uploaded to your Cloudflare account. Completed responses and screenshots are off by default and require explicit opt-in. Do not sync workspaces that prohibit external storage.
+> **Privacy:** Only session metadata is uploaded by default. Full conversation sync is strictly opt-in because prompts, assistant messages, commands, and tool output previews may include sensitive data. Screenshots also require separate opt-in. Do not sync workspaces that prohibit external storage.
 
 ## Interface (Taste Skill redesign)
 
-A unified activity list on the left; the selected thread on the right. On a phone, tap a thread to open it. The result and approved preview come first; activity is optional. The header shows connection state. Search, filters, login, and refresh are built in.
+A unified activity list on the left; the selected thread on the right. On a phone, tap a thread to open it. In transcript mode, you see actual conversation turns and collapsible command/output groups instead of generic tool-name updates. The final result and approved preview remain available; activity is optional. The header shows connection state. Search, filters, login, and refresh are built in.
 
 The upstream `minimalist-ui` skill is bundled locally under `.agents/skills/minimalist-ui/SKILL.md` for future design work on this project. See `INSTALL-TASTE.md` to install or update the official Taste bundle on your Mac. This is a project-level copy, **not a system-wide ChatGPT skill installation**.
 
@@ -19,6 +19,7 @@ The upstream `minimalist-ui` skill is bundled locally under `.agents/skills/mini
 | `worker.js` | **Single standalone file** to paste into Cloudflare Worker editor |
 | `schema.sql` | Cloudflare D1 database tables |
 | `agent.py` | Multi-source Mac agent (Python 3.9+, standard library only) |
+| `conversation.py` | Bounded, privacy-conscious transcript parsers for Codex, Claude Code, and Pi |
 | `site.html` | Editable dashboard UI source |
 | `worker_source.js` | Worker server code before HTML bundling |
 | `build_worker.py` | Rebuild `worker.js` after editing source/UI |
@@ -103,12 +104,45 @@ To add sources to an existing configuration, edit `~/.observer/config.json` and 
 
 Existing installations using `~/.codex-monitor/config.json` continue to work without modification, using Codex-only mode. Re-running `init` saves a new `~/.observer/config.json` configuration. The host uses the existing `protocol: 1` ingestion endpoint and database schema; no D1 migration is required.
 
+## Conversation view (opt-in)
+
+Observer can now mirror the **recent, human-visible conversation** from Codex, Claude Code, and Pi, including:
+
+- Your prompt and subsequent follow-ups
+- Assistant messages in chronological order, with links and code blocks
+- File operations, commands, and other meaningful tool calls grouped into expandable sections
+- Short previews of tool outputs and errors, rather than labels like "Using JS" or "Sleep"
+- Subagents accessible underneath their parent sessions
+
+This is a **read-only, bounded replay**, not remote access to your local application. Raw chain-of-thought, thinking blocks, image bytes, and arbitrary project files are not exported. Pi's active in-file branch is used instead of mixing in abandoned branches. Conversation extraction is intentionally limited to the most recent **48 blocks** and about **14,000 characters** per thread; old records may also fall outside the local JSONL read window. The UI explicitly marks truncated conversations.
+
+**Existing installation:** After updating both `agent.py` and `conversation.py`, enable sharing without re-entering credentials:
+
+```bash
+python3 agent.py set-content transcript
+# Type SYNC after reviewing the privacy warning.
+python3 agent.py once
+python3 agent.py watch
+```
+
+The three supported levels are:
+
+| Command | Data uploaded |
+| --- | --- |
+| `python3 agent.py set-content metadata` | Titles, project names, statuses and coarse activity; default |
+| `python3 agent.py set-content final` | Metadata plus completed assistant responses |
+| `python3 agent.py set-content transcript` | Recent prompts, assistant messages, tool commands and limited tool output previews |
+
+**Security and retention:** Conversation mode can transmit passwords, tokens, file contents or personal information if they appear in your prompts or tool output. The viewer requires your Worker login, but the Cloudflare account can access the stored data. Turning conversation mode off stops future uploads; previously stored transcripts may persist in D1 until affected rows or the database are deleted. Only enable this mode when permitted by your workspace's data policies. `dry-run` can be used to inspect exactly what would be sent before enabling sync.
+
+**Deploy:** Copy the newly built `worker.js` to your Cloudflare Worker and deploy it. The schema and ingestion endpoint remain backward compatible; no D1 migration is required. Merely pulling the repository does not update the deployed website.
+
 ## Run the Mac agent
 
-1. Clone or update this repository on your Mac, and open it in your terminal. Use the same version of `agent.py` as the deployed `worker.js`.
+1. Clone or update this repository on your Mac, and open it in your terminal. Keep `agent.py` and `conversation.py` in the same directory. Use the same version as the deployed `worker.js`.
 2. Choose your sources: Codex (`~/.codex/sessions`), Claude Code (`~/.claude/projects`), Pi (`~/.pi/agent/sessions`), or JSON snapshot files (`~/.observer/feeds`). Missing sources simply produce no activity.
 3. Run `python3 agent.py init`. Enter your deployed Worker URL and the **`AGENT_TOKEN` secret** when prompted (not `VIEW_PASSWORD`).
-4. Select whether to share completed responses; **metadata only** is the default. You may also select an approved screenshots folder.
+4. Choose a sharing level: **metadata** (default), **final responses**, or **full conversation**. Full conversation requires typing `SYNC` as explicit consent. You may also select an approved screenshots folder.
 5. **Verify syncing first:** Run `python3 agent.py once`. A successful test prints `Synced N threads`, including when `N` is zero. An HTTP error means setup is incomplete; see **Troubleshooting**. Do not proceed to continuous monitoring until this succeeds.
 6. Start monitoring with `python3 agent.py watch`. The agent checks for changes about every 30 seconds; the dashboard refreshes about every 12 seconds.
 7. On your phone, visit the same HTTPS Worker URL and sign in with **`VIEW_PASSWORD`**.
