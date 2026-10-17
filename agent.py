@@ -20,9 +20,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+
+import conversation
+from service_adapter import gather_services
 from datetime import datetime, timezone
 from pathlib import Path
-from service_adapter import gather_services
 
 CONFIG_PATH = Path.home() / ".observer" / "config.json"
 LEGACY_CONFIG_PATH = Path.home() / ".codex-monitor" / "config.json"
@@ -142,6 +144,19 @@ def small_json(path: Path, max_bytes: int = 8192) -> dict:
         return {}
 
 
+def is_codex_guardian(meta: dict) -> bool:
+    """Identify internal Codex approval reviewers using explicit rollout metadata."""
+    if not isinstance(meta, dict):
+        return False
+    if meta.get("thread_source") == "guardian_review":
+        return True
+    source = meta.get("source")
+    if not isinstance(source, dict):
+        return False
+    subagent = source.get("subagent")
+    return isinstance(subagent, dict) and subagent.get("other") == "guardian"
+
+
 def codex_parent(meta: dict) -> str:
     """Prefer the rollout's explicit relationship; never infer from prompts."""
     parent = meta.get("parent_thread_id")
@@ -187,6 +202,8 @@ def parse_session(path: Path, titles: dict[str, str], content_mode: str = "metad
     metadata = first.get("payload", {}) if first.get("type") == "session_meta" else {}
     if not isinstance(metadata, dict):
         metadata = {}
+    if is_codex_guardian(metadata):
+        return None
     events = []
     cwd = metadata.get("cwd")
     project = cleaned(Path(cwd).name, 80) if isinstance(cwd, str) and cwd else "Unknown project"
@@ -246,6 +263,8 @@ def parse_session(path: Path, titles: dict[str, str], content_mode: str = "metad
                 if msg:
                     candidate_message = msg
                     events.append({"at": stamp, "kind": "message", "label": "Assistant response updated"})
+    if is_codex_guardian(metadata):
+        return None
     try:
         stat = path.stat()
     except OSError:
@@ -270,9 +289,10 @@ def parse_session(path: Path, titles: dict[str, str], content_mode: str = "metad
         "has_preview": False,
         "final_response": "",
     }
-    if content_mode == "final" and completed_message:
-        # Only include output from a completed turn. Metadata-only is the default.
+    if content_mode in ("final", "transcript") and completed_message:
         session["final_response"] = completed_message[:6000]
+    if content_mode == "transcript":
+        session["conversation"], session["conversation_truncated"], session["summary"] = conversation.codex(records)
     return session
 
 
@@ -298,18 +318,28 @@ def gather_sessions(root: Path = SESSIONS_PATH, index: Path = INDEX_PATH,
         if match and path.stem.endswith(match.group()):
             indexed[match.group().lower()] = path
     chosen = {}
-    for _, path in paths[:max_sessions * 4]:
+    eligible = 0
+    for _, path in paths:
+        entry = first_record(path)
+        meta = entry.get("payload") if entry.get("type") == "session_meta" else None
+        if isinstance(meta, dict) and is_codex_guardian(meta):
+            continue  # Internal reviews must not displace real sessions.
+        eligible += 1
         cursor = path
         for _ in range(10):  # bounded ancestor walk
             if cursor in chosen:
                 break
-            chosen[cursor] = True
             entry = first_record(cursor)
             meta = entry.get("payload") if entry.get("type") == "session_meta" else None
+            if isinstance(meta, dict) and is_codex_guardian(meta):
+                break
+            chosen[cursor] = True
             parent = codex_parent(meta) if isinstance(meta, dict) else ""
             cursor = indexed.get(parent)
             if cursor is None:
                 break
+        if eligible >= max_sessions * 4:
+            break
     titles = load_titles(index)
     result = []
     for path in chosen:
@@ -366,6 +396,7 @@ def parse_claude_session(path: Path, content_mode: str = "metadata") -> dict | N
     if child and not parent_id and isinstance(sidecar.get("parentSessionId"), str) and UUID_PATTERN.fullmatch(sidecar["parentSessionId"]):
         parent_id = "claude-" + sidecar["parentSessionId"].lower()
     events = []
+    records = read_tail_records(path)
     project = "Unknown project"
     title = ""
     status = "unknown"
@@ -373,7 +404,7 @@ def parse_claude_session(path: Path, content_mode: str = "metadata") -> dict | N
     completed = ""
     first_ms = 0
     last_ms = 0
-    for entry in read_tail_records(path):
+    for entry in records:
         at = event_timestamp(entry)
         if at:
             last_ms = max(last_ms, at)
@@ -435,7 +466,7 @@ def parse_claude_session(path: Path, content_mode: str = "metadata") -> dict | N
         status = "quiet"
     if not events:
         events.append({"at": last_ms, "kind": "info", "label": "Session discovered"})
-    return {
+    session = {
         "id": ("claude-sub-" + hashlib.sha256(str(path).encode()).hexdigest()[:24]) if child else "claude-" + match.group().lower(),
         "title": (cleaned(sidecar.get("name"), 110) or ("Subagent " + agent_key[:12])) if child else (title or (project if project != "Unknown project" else "Claude Code session")),
         "project": project,
@@ -447,8 +478,11 @@ def parse_claude_session(path: Path, content_mode: str = "metadata") -> dict | N
         "started_at": first_ms or last_ms,
         "events": events[-KEEP_EVENTS:],
         "has_preview": False,
-        "final_response": completed[:6000] if content_mode == "final" else "",
+        "final_response": completed[:6000] if content_mode in ("final", "transcript") else "",
     }
+    if content_mode == "transcript":
+        session["conversation"], session["conversation_truncated"], session["summary"] = conversation.claude(records)
+    return session
 
 
 def gather_claude_sessions(root: Path = CLAUDE_PATH, max_sessions: int = 20,
@@ -487,7 +521,8 @@ def parse_pi_session(path: Path, content_mode: str = "metadata") -> dict | None:
     candidate = ""
     final = ""
     events = []
-    for entry in read_tail_records(path):
+    records = conversation.pi_active_records(read_tail_records(path))
+    for entry in records:
         at = event_timestamp(entry)
         last_ms = max(last_ms, at or 0)
         if entry.get("type") != "message":
@@ -531,7 +566,7 @@ def parse_pi_session(path: Path, content_mode: str = "metadata") -> dict | None:
         status = "quiet"
     if not events:
         events.append({"at": last_ms, "kind": "info", "label": "Session discovered"})
-    return {
+    session = {
         "id": "pi-" + raw_id,
         "source": "Pi",
         "title": title or (project if project != "Unknown project" else "Pi session"),
@@ -541,8 +576,11 @@ def parse_pi_session(path: Path, content_mode: str = "metadata") -> dict | None:
         "status": status,
         "updated_at": last_ms, "started_at": first_ms or last_ms,
         "events": events[-KEEP_EVENTS:], "has_preview": False,
-        "final_response": final[:6000] if content_mode == "final" else "",
+        "final_response": final[:6000] if content_mode in ("final", "transcript") else "",
     }
+    if content_mode == "transcript":
+        session["conversation"], session["conversation_truncated"], session["summary"] = conversation.pi(records)
+    return session
 
 
 def gather_pi_sessions(root: Path = PI_PATH, max_sessions: int = 20,
@@ -596,7 +634,7 @@ def parse_feed_snapshot(path: Path, root: Path, content_mode: str = "metadata") 
     started = obj.get("started_at")
     if not isinstance(started, (int, float)) or isinstance(started, bool) or started < 946684800000:
         started = updated
-    return {
+    session = {
         "id": session_id,
         "title": cleaned(obj.get("title"), 110) or external_id,
         "project": cleaned(obj.get("project"), 80) or "Unknown project",
@@ -604,8 +642,11 @@ def parse_feed_snapshot(path: Path, root: Path, content_mode: str = "metadata") 
         "type": cleaned(obj.get("type"), 32) or "activity",
         "status": status, "updated_at": int(updated), "started_at": int(started),
         "events": events, "has_preview": False,
-        "final_response": cleaned(obj.get("final_response"), 6000) if content_mode == "final" and status == "completed" else "",
+        "final_response": cleaned(obj.get("final_response"), 6000) if content_mode in ("final", "transcript") and status == "completed" else "",
     }
+    if content_mode == "transcript":
+        session["conversation"], session["conversation_truncated"], session["summary"] = conversation.custom(obj.get("conversation"))
+    return session
 
 
 def gather_feeds(root: Path = FEEDS_PATH, max_sessions: int = 20,
@@ -726,7 +767,16 @@ def interactive_init(path: Path = CONFIG_PATH) -> None:
     types = [part.strip() for part in choices.split(",")]
     if len(types) != len(set(types)) or not types or any(part not in ("codex", "claude", "pi", "files", "services") for part in types):
         raise ValueError("Choose comma-separated sources from codex,claude,pi,files,services")
-    choice = input("Share completed responses with Cloudflare? [y/N]: ").lower().strip()
+    print("Content shared with Cloudflare: metadata only by default.")
+    print("  f: completed responses only")
+    print("  t: conversation, prompts, assistant text, commands and output previews")
+    print("     This may include private file contents or secrets from tool output.")
+    choice = input("Content mode [m/f/t] (default: m): ").lower().strip()
+    if choice not in ("", "m", "n", "f", "y", "t"):
+        raise ValueError("Choose m, f, or t")
+    mode = "transcript" if choice == "t" else "final" if choice in ("f", "y") else "metadata"
+    if mode == "transcript" and input("Type SYNC to allow conversation upload: ").strip() != "SYNC":
+        raise ValueError("Conversation upload not enabled")
     preview_dir = input("Optional approved screenshots folder (blank to disable): ").strip()
     if preview_dir:
         preview = Path(preview_dir).expanduser().resolve()
@@ -738,7 +788,7 @@ def interactive_init(path: Path = CONFIG_PATH) -> None:
         "endpoint": endpoint,
         "agent_token": token,
         "device_id": "mac-" + uuid.uuid4().hex[:12],
-        "content_mode": "final" if choice == "y" else "metadata",
+        "content_mode": mode,
         "screenshots_dir": str(preview) if preview else "",
         "interval_seconds": 30,
         "max_sessions": 20,
@@ -762,7 +812,7 @@ def read_config(path: Path = CONFIG_PATH) -> dict:
         raise ValueError("Missing/weak agent token")
     if not ID_PATTERN.fullmatch(cfg.get("device_id", "")):
         raise ValueError("Invalid device ID")
-    if cfg.get("content_mode") not in ("metadata", "final"):
+    if cfg.get("content_mode") not in ("metadata", "final", "transcript"):
         raise ValueError("Invalid content_mode")
     sources = cfg.get("sources")
     if sources is not None:
@@ -836,9 +886,26 @@ def loop(cfg: dict, once: bool = False, dry_run: bool = False,
             return
 
 
+def set_content_mode(cfg_path: Path, mode: str) -> None:
+    """Change sharing policy without rotating existing device credentials."""
+    config_path = cfg_path
+    if config_path == CONFIG_PATH and not config_path.exists() and LEGACY_CONFIG_PATH.is_file():
+        config_path = LEGACY_CONFIG_PATH
+    cfg = read_config(config_path)
+    if mode == "transcript":
+        print("Conversation mode syncs prompts, visible assistant text, tool commands,")
+        print("and tool output previews to Cloudflare. These may contain sensitive data.")
+        if input("Type SYNC to enable transcript uploads: ").strip() != "SYNC":
+            raise ValueError("Sharing setting unchanged")
+    cfg["content_mode"] = mode
+    write_config(cfg, config_path)
+    print("Content mode:", mode, "- restart agent.py watch to apply")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("init", "watch", "once", "dry-run"))
+    parser.add_argument("command", choices=("init", "watch", "once", "dry-run", "set-content"))
+    parser.add_argument("mode", nargs="?", choices=("metadata", "final", "transcript"))
     parser.add_argument("--config", type=Path, default=CONFIG_PATH)
     parser.add_argument("--sessions-root", type=Path, default=SESSIONS_PATH,
                         help="Override Codex sessions path when using the Codex adapter")
@@ -847,6 +914,10 @@ def main():
     try:
         if args.command == "init":
             interactive_init(args.config)
+        elif args.command == "set-content":
+            if not args.mode:
+                raise ValueError("Usage: python3 agent.py set-content transcript")
+            set_content_mode(args.config, args.mode)
         else:
             cfg = read_config(args.config)
             loop(cfg, once=args.command != "watch", dry_run=args.command == "dry-run",
