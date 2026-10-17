@@ -145,6 +145,13 @@ async function agentAuthorized(request, env) {
   if (!h.startsWith('Bearer ') || typeof env.AGENT_TOKEN !== 'string') return false;
   return equalSecret(h.slice(7), env.AGENT_TOKEN);
 }
+// Legacy agents can still send internal reviews. Unlike user-facing review
+// subagents, Codex Guardian sessions are infrastructure, not coding tasks.
+function isGuardianReview(input) {
+  if (!input || String(input.source || 'Codex').toLowerCase() !== 'codex') return false;
+  return String(input.title || '').trim().toLowerCase() === 'guardian review'
+    || String(input.agent_label || '').trim().toLowerCase() === 'guardian';
+}
 function validateThread(input, now) {
   if (!input || typeof input !== 'object' || !ID.test(input.id || '')) return null;
   const status = statuses.has(input.status) ? input.status : 'unknown';
@@ -184,7 +191,7 @@ async function sync(request, env) {
     const t = validateThread(raw, now);
     if (!t || seen.has(t.id)) return fail('Invalid or duplicate thread');
     seen.add(t.id);
-    threads.push(t);
+    if (!isGuardianReview(t)) threads.push(t);
   }
   // D1 writes are the only mutations; never command or control the Mac agent.
   await env.DB.prepare('INSERT INTO devices (id,last_seen_at,thread_count) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET last_seen_at=excluded.last_seen_at,thread_count=excluded.thread_count')
@@ -224,7 +231,15 @@ async function state(env) {
   const [threadRows, deviceRows] = await Promise.all([
     env.DB.prepare(`SELECT t.snapshot, CASE WHEN p.thread_id IS NULL THEN 0 ELSE 1 END AS has_preview,
       p.updated_at AS preview_updated_at
-      FROM threads t LEFT JOIN previews p ON p.thread_id=t.id ORDER BY t.updated_at DESC LIMIT 40`).all(),
+      FROM threads t LEFT JOIN previews p ON p.thread_id=t.id
+      WHERE NOT (
+        LOWER(COALESCE(json_extract(t.snapshot, '$.source'), 'Codex')) = 'codex'
+        AND (
+          LOWER(TRIM(t.title)) = 'guardian review'
+          OR LOWER(COALESCE(json_extract(t.snapshot, '$.agent_label'), '')) = 'guardian'
+        )
+      )
+      ORDER BY t.updated_at DESC LIMIT 40`).all(),
     env.DB.prepare('SELECT id,last_seen_at,thread_count FROM devices ORDER BY last_seen_at DESC LIMIT 5').all(),
   ]);
   const threads = (threadRows.results || []).map(r => ({
