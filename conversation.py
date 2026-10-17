@@ -170,9 +170,12 @@ class Transcript:
             if prior:
                 kept.insert(0, {**prior, "text": clip(prior.get("text"), 900)})
                 omitted = True
-        last_assistant = next((item.get("text") for item in reversed(kept) if item["role"] == "assistant"), "")
-        last_user = next((item.get("text") for item in reversed(kept) if item["role"] == "user"), "")
-        summary = clip((last_assistant or last_user or "").replace("\n", " "), 160)
+        latest_message = next((item for item in reversed(kept)
+                               if item["role"] in ("assistant", "user")), None)
+        preview = latest_message.get("text", "") if latest_message else ""
+        if latest_message and latest_message["role"] == "user":
+            preview = "You: " + preview
+        summary = clip(preview.replace("\n", " "), 160)
         return kept, omitted, summary
 
 
