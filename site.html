@@ -324,9 +324,20 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
     return {
       devices: [{id: 'demo', last_seen_at: Date.now() - 9000}],
       threads: [
-        {id: '3b9aa460-78e9-4e8f-a693-fd91d0000001', title: 'Redesign the developer dashboard', project: 'frontend-app', status: 'working', updated_at: t(17), events: [{at: t(238), kind: 'start', label: 'Turn started'}, {at: t(145), kind: 'tool', label: 'Tool: shell_command'}, {at: t(63), kind: 'message', label: 'Assistant response updated'}, {at: t(17), kind: 'tool', label: 'Tool: apply_patch'}], final_response: '', has_preview: false},
+        {id: '3b9aa460-78e9-4e8f-a693-fd91d0000001', source: 'Codex', title: 'Redesign the developer dashboard', project: 'frontend-app', status: 'working', updated_at: t(17), summary: 'Updated the dashboard layout and now running checks.', conversation_truncated: false, conversation: [
+          {role:'user', text:'Redesign our developer dashboard. Make the layout cleaner and mobile-friendly, then run the tests.', at:t(238)},
+          {role:'assistant', text:'I’ll simplify the navigation and reorganize the main workspace around the active project.', at:t(210)},
+          {role:'tool', title:'Read src/Dashboard.tsx', detail:'src/Dashboard.tsx', output:'export function Dashboard() { /* existing layout */ }', at:t(145)},
+          {role:'tool', title:'Edited src/Dashboard.tsx', detail:'Replaced the sidebar and introduced a responsive grid.', output:'Updated 1 file', at:t(94)},
+          {role:'assistant', text:'The new layout is in place. I’m checking the build and small-screen behavior.', at:t(63)},
+          {role:'tool', title:'Ran npm test', detail:'npm test', output:'18 passing', at:t(17)}
+        ], events: [{at: t(238), kind: 'start', label: 'Turn started'}, {at: t(145), kind: 'tool', label: 'Tool: shell_command'}, {at: t(63), kind: 'message', label: 'Assistant response updated'}, {at: t(17), kind: 'tool', label: 'Tool: apply_patch'}], final_response: '', has_preview: false},
         {id: '3b9aa460-78e9-4e8f-a693-fd91d0000002', source: 'Claude Code', title: 'Implement authentication flow', project: 'api-service', status: 'completed', updated_at: t(1020), events: [{at: t(1470), kind: 'tool', label: 'Tool: apply_patch'}, {at: t(1030), kind: 'message', label: 'Assistant responded'}, {at: t(1020), kind: 'complete', label: 'Turn completed'}], final_response: 'Implemented authentication and session handling.\n\nAll 12 tests passed.\n\nhttps://example.com', has_preview: false},
-        {id: '3b9aa460-78e9-4e8f-a693-fd91d0000003', title: 'Optimize model inference', project: 'knee-mri', status: 'quiet', updated_at: t(385), events: [{at: t(425), kind: 'start', label: 'Turn started'}, {at: t(385), kind: 'tool', label: 'Tool: shell_command'}], final_response: '', has_preview: false},
+        {id: '3b9aa460-78e9-4e8f-a693-fd91d0000003', source: 'Pi', title: 'Optimize model inference', project: 'knee-mri', status: 'quiet', updated_at: t(385), summary: 'Tracing the slow inference path and comparing approaches.', conversation_truncated: true, conversation: [
+          {role:'user', text:'Find the performance bottleneck in inference and reduce memory usage.', at:t(920)},
+          {role:'assistant', text:'The largest allocation occurs in preprocessing. I’m testing a streamed batch path.', at:t(740)},
+          {role:'tool', title:'Ran python benchmark.py', detail:'python benchmark.py --batch-size 8', output:'Median latency 194ms', at:t(510)}
+        ], events: [{at: t(425), kind: 'start', label: 'Turn started'}, {at: t(385), kind: 'tool', label: 'Tool: shell_command'}], final_response: '', has_preview: false},
         {id: '3b9aa460-78e9-4e8f-a693-fd91d0000004', source: 'Custom', title: 'Fix persistent segment tree edge case', project: 'cp-solutions', status: 'completed', updated_at: t(20000), events: [{at: t(20000), kind: 'complete', label: 'Turn completed'}], final_response: 'Fixed the empty-range query. Tests pass.', has_preview: false},
       ],
     };
