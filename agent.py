@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Read-only Codex Desktop session observer. Python standard library only.
+"""Read-only multi-source activity observer. Python standard library only.
 
-Does not invoke Codex, shell commands, or mutate the Codex home directory.
-Only sends metadata and explicitly enabled final responses and screenshots.
+Codex, Claude Code, and opted-in JSON snapshot directories are supported.
+Never invokes tools, runs commands, or mutates monitored sources.
 """
 from __future__ import annotations
 
@@ -23,9 +23,16 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-CONFIG_PATH = Path.home() / ".codex-monitor" / "config.json"
+CONFIG_PATH = Path.home() / ".observer" / "config.json"
+LEGACY_CONFIG_PATH = Path.home() / ".codex-monitor" / "config.json"
 SESSIONS_PATH = Path.home() / ".codex" / "sessions"
 INDEX_PATH = Path.home() / ".codex" / "session_index.jsonl"
+CLAUDE_PATH = Path.home() / ".claude" / "projects"
+FEEDS_PATH = Path.home() / ".observer" / "feeds"
+STATUSES = {"working", "completed", "quiet", "interrupted", "unknown"}
+EVENT_KINDS = {"start", "complete", "warning", "tool", "message", "thought", "info"}
+UUID_PATTERN = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+
 ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{6,100}$")
 CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.I)
@@ -186,8 +193,9 @@ def parse_session(path: Path, titles: dict[str, str], content_mode: str = "metad
         events.append({"at": last_activity_ms, "kind": "info", "label": "Session discovered"})
     session = {
         "id": thread_id,
-        "title": titles.get(thread_id) or (project if project != "Unknown project" else "Untitled Codex session"),
+        "title": titles.get(thread_id) or (project if project != "Unknown project" else "Codex session"),
         "project": project,
+        "source": "Codex",
         "status": event_state,
         "updated_at": last_activity_ms,
         "started_at": first_timestamp or last_activity_ms,
@@ -209,8 +217,8 @@ def gather_sessions(root: Path = SESSIONS_PATH, index: Path = INDEX_PATH,
     paths = []
     for p in root.rglob("rollout-*.jsonl"):
         try:
-            # Avoid following symlinks out of the Codex session tree.
-            if not p.is_file() or not p.resolve().is_relative_to(root_real):
+            # Never read a symlink or a file outside the selected source tree.
+            if p.is_symlink() or not p.is_file() or not p.resolve().is_relative_to(root_real):
                 continue
             paths.append((p.stat().st_mtime, p))
         except OSError:
@@ -223,6 +231,233 @@ def gather_sessions(root: Path = SESSIONS_PATH, index: Path = INDEX_PATH,
         if item:
             result.append(item)
     return result
+
+
+
+
+def source_files(root: Path, pattern: str, max_files: int) -> list[Path]:
+    """Newest files inside a designated directory; no symlinks or escapes."""
+    root = root.expanduser()
+    if not root.is_dir() or root.is_symlink():
+        return []
+    resolved = root.resolve()
+    found = []
+    for path in root.rglob(pattern):
+        try:
+            if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(resolved):
+                continue
+            found.append((path.stat().st_mtime, path))
+        except OSError:
+            continue
+    found.sort(key=lambda item: item[0], reverse=True)
+    return [path for _, path in found[:max_files]]
+
+
+def claude_text(message: dict) -> str:
+    """Extract only visible assistant text, never thinking/tool arguments."""
+    content = message.get("content")
+    if not isinstance(content, list):
+        return ""
+    return cleaned("\n".join(
+        part["text"] for part in content
+        if isinstance(part, dict) and part.get("type") == "text"
+        and isinstance(part.get("text"), str)
+    ), 8000)
+
+
+def parse_claude_session(path: Path, content_mode: str = "metadata") -> dict | None:
+    match = UUID_PATTERN.fullmatch(path.stem)
+    if not match:
+        return None  # Skip sidecars and subagent traces.
+    events = []
+    project = "Unknown project"
+    title = ""
+    status = "unknown"
+    candidate = ""
+    completed = ""
+    first_ms = 0
+    last_ms = 0
+    for entry in read_tail_records(path):
+        at = event_timestamp(entry)
+        if at:
+            last_ms = max(last_ms, at)
+            if not first_ms:
+                first_ms = at
+        cwd = entry.get("cwd")
+        if isinstance(cwd, str) and cwd:
+            project = cleaned(Path(cwd).name, 80) or project
+        slug = entry.get("slug")
+        if isinstance(slug, str) and slug:
+            title = cleaned(slug.replace("-", " "), 110)
+        typ = entry.get("type")
+        if typ == "user":
+            # A new user turn invalidates any previously completed result.
+            status = "working"
+            candidate = completed = ""
+            events.append({"at": at, "kind": "start", "label": "Turn started"})
+        elif typ == "assistant":
+            message = entry.get("message")
+            if not isinstance(message, dict):
+                continue
+            content = message.get("content")
+            if isinstance(content, list):
+                tools = [
+                    cleaned(block.get("name"), 55)
+                    for block in content
+                    if isinstance(block, dict) and block.get("type") == "tool_use"
+                ]
+                for tool in tools:
+                    events.append({"at": at, "kind": "tool", "label": "Tool: " + (tool or "Tool")})
+                if tools:
+                    status = "working"
+            output = claude_text(message)
+            if output:
+                candidate = output
+                events.append({"at": at, "kind": "message", "label": "Assistant responded"})
+            if message.get("stop_reason") == "end_turn":
+                status = "completed"
+                completed = candidate
+                events.append({"at": at, "kind": "complete", "label": "Turn completed"})
+        elif typ == "system" and entry.get("subtype") == "turn_duration":
+            status = "completed"
+            completed = candidate
+            events.append({"at": at, "kind": "complete", "label": "Turn completed"})
+        elif typ == "result":
+            # Some exported sessions include an explicit result record.
+            if entry.get("is_error"):
+                status = "interrupted"
+                events.append({"at": at, "kind": "warning", "label": "Turn interrupted"})
+            else:
+                status = "completed"
+                completed = candidate
+                events.append({"at": at, "kind": "complete", "label": "Turn completed"})
+    try:
+        last_ms = max(last_ms, int(path.stat().st_mtime * 1000))
+    except OSError:
+        return None
+    if status == "working" and int(time.time() * 1000) - last_ms > 180_000:
+        status = "quiet"
+    if not events:
+        events.append({"at": last_ms, "kind": "info", "label": "Session discovered"})
+    return {
+        "id": "claude-" + match.group().lower(),
+        "title": title or (project if project != "Unknown project" else "Claude Code session"),
+        "project": project,
+        "source": "Claude Code",
+        "status": status,
+        "updated_at": last_ms,
+        "started_at": first_ms or last_ms,
+        "events": events[-KEEP_EVENTS:],
+        "has_preview": False,
+        "final_response": completed[:6000] if content_mode == "final" else "",
+    }
+
+
+def gather_claude_sessions(root: Path = CLAUDE_PATH, max_sessions: int = 20,
+                           content_mode: str = "metadata") -> list[dict]:
+    result = []
+    for path in source_files(root, "*.jsonl", max_sessions * 3):
+        item = parse_claude_session(path, content_mode)
+        if item:
+            result.append(item)
+        if len(result) >= max_sessions:
+            break
+    return result
+
+
+def parse_feed_snapshot(path: Path, root: Path, content_mode: str = "metadata") -> dict | None:
+    """Read a small, explicit JSON activity snapshot without executing anything."""
+    try:
+        if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
+            return None
+        if not 0 < path.stat().st_size <= 128_000:
+            return None
+        obj = json.loads(path.read_text("utf-8"))
+        if not isinstance(obj, dict):
+            return None
+        external_id = obj.get("id") or path.stem
+        if not isinstance(external_id, str) or not ID_PATTERN.fullmatch(external_id):
+            return None
+        # Relative path + declared ID give stable, collision-resistant identities.
+        key = str(path.relative_to(root)) + ":" + external_id
+        session_id = "feed-" + hashlib.sha256(key.encode()).hexdigest()[:24]
+        changed = int(path.stat().st_mtime * 1000)
+    except (OSError, UnicodeError, ValueError):
+        return None
+    updated = obj.get("updated_at")
+    if not isinstance(updated, (int, float)) or isinstance(updated, bool) or not 946684800000 <= updated <= time.time() * 1000 + 300_000:
+        updated = changed
+    status = obj.get("status") if obj.get("status") in STATUSES else "unknown"
+    if status == "working" and int(time.time() * 1000) - updated > 180_000:
+        status = "quiet"
+    events = []
+    for event in (obj.get("events") if isinstance(obj.get("events"), list) else [])[-KEEP_EVENTS:]:
+        if not isinstance(event, dict):
+            continue
+        at = event.get("at")
+        if not isinstance(at, (int, float)) or isinstance(at, bool) or not 946684800000 <= at <= time.time() * 1000 + 300_000:
+            at = updated
+        events.append({
+            "at": int(at), "kind": event.get("kind") if event.get("kind") in EVENT_KINDS else "info",
+            "label": cleaned(event.get("label"), 140),
+        })
+    if not events:
+        events = [{"at": int(updated), "kind": "info", "label": "Last updated"}]
+    started = obj.get("started_at")
+    if not isinstance(started, (int, float)) or isinstance(started, bool) or started < 946684800000:
+        started = updated
+    return {
+        "id": session_id,
+        "title": cleaned(obj.get("title"), 110) or external_id,
+        "project": cleaned(obj.get("project"), 80) or "Unknown project",
+        "source": cleaned(obj.get("source"), 40) or "Custom",
+        "status": status, "updated_at": int(updated), "started_at": int(started),
+        "events": events, "has_preview": False,
+        "final_response": cleaned(obj.get("final_response"), 6000) if content_mode == "final" and status == "completed" else "",
+    }
+
+
+def gather_feeds(root: Path = FEEDS_PATH, max_sessions: int = 20,
+                 content_mode: str = "metadata") -> list[dict]:
+    result = []
+    for path in source_files(root, "*.json", max_sessions):
+        item = parse_feed_snapshot(path, root, content_mode)
+        if item:
+            result.append(item)
+    return result
+
+
+def configured_sessions(cfg: dict, sessions_root: Path = SESSIONS_PATH,
+                        index: Path = INDEX_PATH) -> list[dict]:
+    """Collect from the configured adapters using one unchanged sync protocol."""
+    max_sessions = min(30, max(1, int(cfg.get("max_sessions", 20))))
+    mode = cfg.get("content_mode", "metadata")
+    sources = cfg.get("sources")
+    if sources is None:  # Existing Codex-only config remains usable.
+        sources = [{"type": "codex"}]
+    result = []
+    for source in sources:
+        kind = source.get("type") if isinstance(source, dict) else source
+        if kind == "codex":
+            root = Path(source.get("path", sessions_root)) if isinstance(source, dict) else sessions_root
+            names = Path(source.get("index", index)) if isinstance(source, dict) else index
+            result.extend(gather_sessions(root.expanduser(), names.expanduser(), max_sessions, mode))
+        elif kind == "claude":
+            root = Path(source.get("path", CLAUDE_PATH)) if isinstance(source, dict) else CLAUDE_PATH
+            result.extend(gather_claude_sessions(root.expanduser(), max_sessions, mode))
+        elif kind == "files":
+            root = Path(source.get("path", FEEDS_PATH)) if isinstance(source, dict) else FEEDS_PATH
+            result.extend(gather_feeds(root.expanduser(), max_sessions, mode))
+    result.sort(key=lambda item: item["updated_at"], reverse=True)
+    unique = []
+    seen = set()
+    for item in result:
+        if item["id"] not in seen:
+            seen.add(item["id"])
+            unique.append(item)
+        if len(unique) == max_sessions:
+            break
+    return unique
 
 
 def preview_file(artifacts_dir: Path, thread_id: str) -> tuple[bytes, str, str] | None:
@@ -266,7 +501,7 @@ def send_json(endpoint: str, token: str, path: str, payload: dict, timeout: int 
     request = urllib.request.Request(endpoint + path, data=data, method="POST", headers={
         "Authorization": "Bearer " + token,
         "Content-Type": "application/json",
-        "User-Agent": "CodexMonitor/1.0",
+        "User-Agent": "Observer/2.0",
     })
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read(20_000))
@@ -284,13 +519,17 @@ def write_config(cfg: dict, path: Path = CONFIG_PATH) -> None:
 
 
 def interactive_init(path: Path = CONFIG_PATH) -> None:
-    print("Codex Monitor - Mac agent setup (read-only)")
+    print("Observer - Mac agent setup (read-only)")
     print("You must first deploy your private Cloudflare Worker.")
     endpoint = validate_endpoint(input("Worker URL (https://...workers.dev): ").strip())
     token = getpass.getpass("Agent token (Cloudflare AGENT_TOKEN secret): ").strip()
     if len(token) < 30:
         raise ValueError("Use a randomly generated agent token of at least 30 characters")
-    choice = input("Share final assistant messages with Cloudflare? [y/N]: ").lower().strip()
+    choices = input("Sources [codex,claude,files] (default: codex,files): ").lower().strip() or "codex,files"
+    types = [part.strip() for part in choices.split(",")]
+    if len(types) != len(set(types)) or not types or any(part not in ("codex", "claude", "files") for part in types):
+        raise ValueError("Choose comma-separated sources from codex,claude,files")
+    choice = input("Share completed responses with Cloudflare? [y/N]: ").lower().strip()
     preview_dir = input("Optional approved screenshots folder (blank to disable): ").strip()
     if preview_dir:
         preview = Path(preview_dir).expanduser().resolve()
@@ -306,6 +545,7 @@ def interactive_init(path: Path = CONFIG_PATH) -> None:
         "screenshots_dir": str(preview) if preview else "",
         "interval_seconds": 30,
         "max_sessions": 20,
+        "sources": [{"type": kind} for kind in types],
     }
     write_config(cfg, path)
     print("\nSaved private config:", path)
@@ -313,6 +553,8 @@ def interactive_init(path: Path = CONFIG_PATH) -> None:
 
 
 def read_config(path: Path = CONFIG_PATH) -> dict:
+    if path == CONFIG_PATH and not path.is_file() and LEGACY_CONFIG_PATH.is_file():
+        path = LEGACY_CONFIG_PATH
     if not path.is_file():
         raise ValueError("No config found. Run: python3 agent.py init")
     if path.stat().st_mode & 0o077:
@@ -325,12 +567,25 @@ def read_config(path: Path = CONFIG_PATH) -> dict:
         raise ValueError("Invalid device ID")
     if cfg.get("content_mode") not in ("metadata", "final"):
         raise ValueError("Invalid content_mode")
+    sources = cfg.get("sources")
+    if sources is not None:
+        if not isinstance(sources, list) or not sources or len(sources) > 3:
+            raise ValueError("Invalid sources")
+        kinds = []
+        for source in sources:
+            kind = source.get("type") if isinstance(source, dict) else source
+            if kind not in ("codex", "claude", "files") or kind in kinds:
+                raise ValueError("Unknown or duplicate source")
+            if isinstance(source, dict):
+                for key in ("path", "index"):
+                    if key in source and (not isinstance(source[key], str) or not source[key].strip()):
+                        raise ValueError("Invalid source path")
+            kinds.append(kind)
     return cfg
 
 
 def snapshot(cfg: dict, sessions_root: Path = SESSIONS_PATH, index: Path = INDEX_PATH) -> dict:
-    sessions = gather_sessions(sessions_root, index, min(30, max(1, int(cfg.get("max_sessions", 20)))),
-                               cfg.get("content_mode", "metadata"))
+    sessions = configured_sessions(cfg, sessions_root, index)
     return {"device_id": cfg["device_id"],
             "generated_at": int(time.time() * 1000),
             "threads": sessions, "protocol": 1}
@@ -389,7 +644,7 @@ def main():
     parser.add_argument("command", choices=("init", "watch", "once", "dry-run"))
     parser.add_argument("--config", type=Path, default=CONFIG_PATH)
     parser.add_argument("--sessions-root", type=Path, default=SESSIONS_PATH,
-                        help="For testing / custom CODEX_HOME")
+                        help="Override Codex sessions path when using the Codex adapter")
     parser.add_argument("--index", type=Path, default=INDEX_PATH)
     args = parser.parse_args()
     try:

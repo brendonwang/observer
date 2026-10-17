@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#fafaf8">
 <meta name="color-scheme" content="light">
-<meta name="description" content="Codex thread monitor">
+<meta name="description" content="Private activity monitor">
 <title>Observer</title>
 <style nonce="__NONCE__">
 :root{--bg:#fafaf8;--ink:#252724;--muted:#777b75;--line:#e6e8e3;--hover:#f3f4f0;--selected:#eff1ed;--green:#39775a;--red:#9f5a51;--sans:"SF Pro Display","Helvetica Neue",-apple-system,BlinkMacSystemFont,Arial,sans-serif;--serif:Georgia,"Times New Roman",serif}
@@ -33,6 +33,9 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
 .search{height:42px;display:flex;align-items:center;border-bottom:1px solid var(--line);padding:0 2px;background:transparent}
 .search:focus-within{border-color:#819c87}
 .search input{border:0;outline:0;background:none;min-width:0;width:100%;font-size:13px;color:var(--ink)}.search input::placeholder{color:#9a9f99}
+ .source-select{min-width:0;max-width:145px;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--muted);height:37px;font-size:12px;outline-offset:2px}
+ .controls{display:flex;gap:12px;align-items:center}
+ .controls .search{flex:1;min-width:0}
 .filters{display:flex;gap:24px;padding:9px 0 0;border-bottom:1px solid var(--line)}
 .filter{position:relative;color:var(--muted);border:0;background:none;font-size:12px;padding:10px 0 13px;min-height:43px}
 .filter:hover,.filter.active{color:var(--ink)}.filter.active{font-weight:650}.filter.active::after{content:"";position:absolute;bottom:-1px;left:0;right:0;height:2px;background:var(--ink)}
@@ -117,7 +120,7 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
     <p id="error-notice" class="notice" role="status" hidden></p>
     <div class="workspace">
       <section class="list-panel" aria-label="Threads">
-        <label class="search"><input type="search" id="search" aria-label="Search threads" placeholder="Search threads"></label>
+        <div class="controls"><label class="search"><input type="search" id="search" aria-label="Search threads" placeholder="Search threads"></label><select id="source-filter" class="source-select" aria-label="Filter by source"><option value="all">All sources</option></select></div>
         <div class="filters" role="group" aria-label="Filter threads"><button class="filter active" type="button" data-filter="all" aria-pressed="true">All</button><button class="filter" type="button" data-filter="working" aria-pressed="false">Running</button><button class="filter" type="button" data-filter="completed" aria-pressed="false">Done</button></div>
         <div id="session-list"></div>
       </section>
@@ -144,6 +147,7 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
   let selected = null;
   let filter = 'all';
   let term = '';
+  let selectedSource = 'all';
   let listKey = '';
   let initialized = false;
   let loggedIn = false;
@@ -211,7 +215,8 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
   function filteredThreads() {
     return state.threads.filter(thread => {
       const matchesStatus = filter === 'all' || statusOf(thread) === filter;
-      return matchesStatus && (String(thread.title || '') + ' ' + String(thread.project || '')).toLowerCase().includes(term);
+      const matchesSource = selectedSource === 'all' || (thread.source || 'Codex') === selectedSource;
+      return matchesStatus && matchesSource && (String(thread.title || '') + ' ' + String(thread.project || '') + ' ' + String(thread.source || '')).toLowerCase().includes(term);
     });
   }
 
@@ -283,10 +288,10 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
     return {
       devices: [{id: 'demo', last_seen_at: Date.now() - 9000}],
       threads: [
-        {id: '3b9aa460-78e9-4e8f-a693-fd91d0000001', title: 'Redesign the developer dashboard', project: 'frontend-app', status: 'working', updated_at: t(17), events: [{at: t(238), kind: 'start', label: 'Codex started a turn'}, {at: t(145), kind: 'tool', label: 'Tool: shell_command'}, {at: t(63), kind: 'message', label: 'Assistant response updated'}, {at: t(17), kind: 'tool', label: 'Tool: apply_patch'}], final_response: '', has_preview: false},
-        {id: '3b9aa460-78e9-4e8f-a693-fd91d0000002', title: 'Implement authentication flow', project: 'api-service', status: 'completed', updated_at: t(1020), events: [{at: t(1470), kind: 'tool', label: 'Tool: apply_patch'}, {at: t(1030), kind: 'message', label: 'Codex posted a response'}, {at: t(1020), kind: 'complete', label: 'Turn completed'}], final_response: 'Implemented authentication and session handling.\n\nAll 12 tests passed.\n\nhttps://example.com', has_preview: false},
-        {id: '3b9aa460-78e9-4e8f-a693-fd91d0000003', title: 'Optimize model inference', project: 'knee-mri', status: 'quiet', updated_at: t(385), events: [{at: t(425), kind: 'start', label: 'Codex started a turn'}, {at: t(385), kind: 'tool', label: 'Tool: shell_command'}], final_response: '', has_preview: false},
-        {id: '3b9aa460-78e9-4e8f-a693-fd91d0000004', title: 'Fix persistent segment tree edge case', project: 'cp-solutions', status: 'completed', updated_at: t(20000), events: [{at: t(20000), kind: 'complete', label: 'Turn completed'}], final_response: 'Fixed the empty-range query. Tests pass.', has_preview: false},
+        {id: '3b9aa460-78e9-4e8f-a693-fd91d0000001', title: 'Redesign the developer dashboard', project: 'frontend-app', status: 'working', updated_at: t(17), events: [{at: t(238), kind: 'start', label: 'Turn started'}, {at: t(145), kind: 'tool', label: 'Tool: shell_command'}, {at: t(63), kind: 'message', label: 'Assistant response updated'}, {at: t(17), kind: 'tool', label: 'Tool: apply_patch'}], final_response: '', has_preview: false},
+        {id: '3b9aa460-78e9-4e8f-a693-fd91d0000002', source: 'Claude Code', title: 'Implement authentication flow', project: 'api-service', status: 'completed', updated_at: t(1020), events: [{at: t(1470), kind: 'tool', label: 'Tool: apply_patch'}, {at: t(1030), kind: 'message', label: 'Assistant responded'}, {at: t(1020), kind: 'complete', label: 'Turn completed'}], final_response: 'Implemented authentication and session handling.\n\nAll 12 tests passed.\n\nhttps://example.com', has_preview: false},
+        {id: '3b9aa460-78e9-4e8f-a693-fd91d0000003', title: 'Optimize model inference', project: 'knee-mri', status: 'quiet', updated_at: t(385), events: [{at: t(425), kind: 'start', label: 'Turn started'}, {at: t(385), kind: 'tool', label: 'Tool: shell_command'}], final_response: '', has_preview: false},
+        {id: '3b9aa460-78e9-4e8f-a693-fd91d0000004', source: 'Custom', title: 'Fix persistent segment tree edge case', project: 'cp-solutions', status: 'completed', updated_at: t(20000), events: [{at: t(20000), kind: 'complete', label: 'Turn completed'}], final_response: 'Fixed the empty-range query. Tests pass.', has_preview: false},
       ],
     };
   }
@@ -313,6 +318,20 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
     $('connection-text').textContent = demo ? 'Demo' : online() ? 'Live' : state.devices.length ? 'Offline' : 'Waiting';
   }
 
+  function renderSources() {
+    const select = $('source-filter');
+    const sources = [...new Set(state.threads.map(t => t.source || 'Codex'))].sort();
+    if (selectedSource !== 'all' && !sources.includes(selectedSource)) selectedSource = 'all';
+    const key = JSON.stringify(sources);
+    if (select.dataset.sources !== key) {
+      select.replaceChildren(new Option('All sources', 'all'));
+      sources.forEach(source => select.add(new Option(source, source)));
+      select.dataset.sources = key;
+    }
+    select.value = selectedSource;
+    select.hidden = sources.length < 2;
+  }
+
   function alignSelection() {
     const visible = filteredThreads();
     if (!visible.some(thread => thread.id === selected)) selected = visible[0]?.id || null;
@@ -324,7 +343,7 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
 
   function renderList() {
     const threads = filteredThreads();
-    const key = JSON.stringify([threads.map(thread => [thread.id, thread.title, thread.project, thread.updated_at, statusOf(thread)]), selected, filter, term]);
+    const key = JSON.stringify([threads.map(thread => [thread.id, thread.title, thread.project, thread.source, thread.updated_at, statusOf(thread)]), selected, filter, term, selectedSource]);
     if (listKey === key) return;
     listKey = key;
     const list = $('session-list');
@@ -347,6 +366,7 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
       if (thread.project && thread.project !== 'Unknown project') {
         meta.append(element('span', 'project', thread.project), element('span', '', '\u00b7'));
       }
+      if (thread.source) meta.append(element('span', '', thread.source), element('span', '', '\u00b7'));
       meta.append(when(thread.updated_at));
       button.append(header, meta);
       button.addEventListener('click', () => openThread(thread.id));
@@ -372,7 +392,8 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
     const badge = element('span', 'status detail-status');
     const project = element('span', 'detail-project');
     const time = when(0);
-    meta.append(badge, project, time);
+    const source = element('span', 'detail-source');
+    meta.append(badge, source, project, time);
     header.append(title, meta);
     root.append(header);
 
@@ -436,6 +457,7 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
     const title = root.querySelector('.detail-title');
     if (title.textContent !== thread.title) title.textContent = thread.title;
     setStatus(root.querySelector('.detail-status'), status);
+    root.querySelector('.detail-source').textContent = thread.source || 'Codex';
     const project = root.querySelector('.detail-project');
     project.textContent = thread.project && thread.project !== 'Unknown project' ? thread.project : '';
     project.hidden = !project.textContent;
@@ -500,6 +522,7 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
   function render() {
     if (!loggedIn) return;
     renderHeader();
+    renderSources();
     renderList();
     renderDetail();
     refreshRelativeTimes();
@@ -633,6 +656,12 @@ a{color:inherit;text-underline-offset:3px}a:hover{color:var(--green)}
   });
 
   $('refresh').addEventListener('click', refresh);
+  $('source-filter').addEventListener('change', event => {
+    selectedSource = event.target.value;
+    alignSelection();
+    listKey = '';
+    render();
+  });
   $('search').addEventListener('input', event => {
     term = event.target.value.trim().toLowerCase();
     alignSelection();
