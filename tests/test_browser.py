@@ -34,6 +34,10 @@ def run():
                     "document.documentElement.scrollWidth > window.innerWidth")
                 page.locator(".activity").first.click()
                 assert page.locator('[role="dialog"]').is_visible()
+                assert page.locator(".conv-message").count() >= 2
+                assert page.locator(".conv-tools").count() >= 1
+                page.locator(".conv-tools summary").first.click()
+                assert page.locator(".conv-steps").first.is_visible()
                 page.keyboard.press("Escape")
                 assert page.locator("#overlay").is_hidden()
                 page.locator('[data-tab="activity"]').click()
@@ -47,7 +51,12 @@ def run():
                 "devices":[{"id":"mac-test", "last_seen_at":9999999999999}],
                 "threads":[
                     {"id":"parent-123456", "project":"website", "title":"Build UI",
-                     "source":"Codex", "status":"working", "updated_at":1792195200000},
+                     "source":"Codex", "status":"working", "updated_at":1792195200000,
+                     "conversation":[
+                       {"role":"user","text":"Fix the layout","at":1792195200000},
+                       {"role":"tool","title":"Read files","detail":"src/main.js","output":"Found the component","at":1792195200000},
+                       {"role":"assistant","text":"The layout is ready","at":1792195200000},
+                     ]},
                     {"id":"child-123456", "project":"website", "title":"Subagent task",
                      "source":"Codex", "parent_id":"parent-123456", "agent_label":"Layout",
                      "status":"completed", "updated_at":1792195200000},
@@ -90,6 +99,9 @@ window.__state = __STATE__;
             assert page.locator(".activity").count() == 2  # subagents and Guardian hidden
             page.locator(".activity").first.click()
             page.get_by_text("Subagents", exact=True).wait_for()
+            assert page.locator(".conv-message").count() == 2
+            assert page.locator(".conv-tools").count() == 1
+            assert page.locator(".conv-content").last.inner_text() == "The layout is ready"
             page.locator(".subtask").first.click()
             assert page.locator("#dialog-title").inner_text() == "Subagent task"
             page.locator(".back-link").click()
