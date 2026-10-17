@@ -102,13 +102,17 @@ test('Guardian reviews are discarded at ingestion without suppressing real revie
     agent_label:'reviewer', status:'working', updated_at:Date.now(), events:[]};
   const guardian={...working,id:'9b7de491-44c4-4979-8b1f-f2eacc612347',
     title:'Guardian review',agent_label:'guardian'};
-  const response=await call('/api/agent/sync','POST',
-    {protocol:1,device_id:'mac-123456789abc',threads:[guardian,working]},
-    {Authorization:'Bearer '+env.AGENT_TOKEN});
+  const db=new FakeDB();
+  const localEnv={...env,DB:db};
+  const response=await worker.fetch(new Request(origin+'/api/agent/sync',{
+    method:'POST',
+    headers:{Authorization:'Bearer '+env.AGENT_TOKEN,'Content-Type':'application/json'},
+    body:JSON.stringify({protocol:1,device_id:'mac-123456789abc',threads:[guardian,working]}),
+  }),localEnv);
   assert.equal(response.status,200);
   assert.equal((await response.json()).accepted,1);
-  assert.ok(env.DB.threads.has(working.id));
-  assert.equal(env.DB.threads.has(guardian.id),false);
+  assert.ok(db.threads.has(working.id));
+  assert.equal(db.threads.has(guardian.id),false);
 });
 
 test('cached Guardians do not crowd older real sessions out of state',async()=>{
