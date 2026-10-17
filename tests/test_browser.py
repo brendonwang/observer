@@ -32,7 +32,7 @@ def run():
                     "(e) => getComputedStyle(e).backgroundColor") == "rgb(250, 250, 248)"
                 assert not page.evaluate(
                     "document.documentElement.scrollWidth > window.innerWidth")
-                page.locator(".activity").first.click()
+                page.locator(".activity").filter(has_text="Implement notifications").click()
                 assert page.locator('[role="dialog"]').is_visible()
                 assert page.locator(".conv-message").count() >= 2
                 assert page.locator(".conv-tools").count() >= 1
