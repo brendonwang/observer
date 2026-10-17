@@ -1,118 +1,109 @@
-"""Optional real-browser regression checks (requires Playwright and Chromium)."""
-import asyncio
-import os
-import shutil
-import tempfile
+"""Optional browser smoke tests for the project workspace and private login."""
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 try:
-    from playwright.async_api import async_playwright
+    from playwright.sync_api import sync_playwright
 except ImportError:
-    async_playwright = None
-
-CHROMIUM = os.environ.get('CHROMIUM_PATH') or shutil.which('chromium') or shutil.which('google-chrome')
-SHOT_DIR = Path(os.environ.get('OBSERVER_SCREENSHOT_DIR', tempfile.gettempdir()))
+    sync_playwright = None
 
 
-async def preview_checks(browser):
-    page = await browser.new_page(viewport={'width': 390, 'height': 844})
-    errors = []
-    page.on('pageerror', lambda error: errors.append(str(error)))
-    await page.set_content((ROOT / 'dashboard-preview.html').read_text(), wait_until='domcontentloaded')
-    await page.locator('button.thread').first.wait_for()
-    assert await page.locator('button.thread').count() == 4
-    assert not await page.evaluate('document.documentElement.scrollWidth > innerWidth')
-    assert 'Threads' in await page.locator('.main-head h1').inner_text()
-    await page.screenshot(path=str(SHOT_DIR / 'observer-reviewed-mobile.png'))
-    await page.locator('button.thread').nth(1).click()
-    assert await page.locator('.detail-title').inner_text() == 'Implement authentication flow'
-    assert await page.locator('.list-panel').is_hidden()
-    assert await page.locator('.response a[href="https://example.com/"]').count() == 1
-    await page.locator('.disclosure summary').click()
-    assert await page.locator('.disclosure').evaluate('(e) => e.open')
-    assert not errors, errors
-    await page.screenshot(path=str(SHOT_DIR / 'observer-reviewed-mobile-detail.png'))
-    await page.locator('.mobile-back').click()
-    await page.wait_for_timeout(150)
-    assert await page.locator('.list-panel').is_visible()
-    assert not errors, errors
-    await page.close()
-
-
-async def hosted_checks(browser):
-    page = await browser.new_page(viewport={'width': 1250, 'height': 840})
-    errors = []
-    page.on('pageerror', lambda error: errors.append(str(error)))
-    html = (ROOT / 'site.html').read_text()
-    now = 1792195200000
-    tid = '3b9aa460-78e9-4e8f-a693-fd91d0000002'
-    events = [{'at': now, 'kind': 'start', 'label': 'Codex started a turn'}]
-    state = {'devices': [{'last_seen_at': 9999999999999}], 'threads': [{
-        'id': tid, 'title': 'Implement auth', 'project': 'api-service',
-        'status': 'completed', 'updated_at': 9999999999999, 'events': events,
-        'final_response': 'Done. [Open preview](https://example.com/demo)', 'has_preview': False,
-    }]}
-    signed_in = False
-    force_logout_error = False
-    async def handler(route):
-        nonlocal signed_in
-        if route.request.url.endswith('/api/state'):
-            await route.fulfill(status=200 if signed_in else 401, content_type='application/json', body=__import__('json').dumps(state if signed_in else {'error': 'Unauthorized'}))
-        elif route.request.url.endswith('/api/login'):
-            signed_in = True
-            await route.fulfill(status=200, content_type='application/json', body='{"ok":true}')
-        elif route.request.url.endswith('/api/logout'):
-            if force_logout_error:
-                await route.fulfill(status=500, content_type='application/json', body='{"error":"Unavailable"}')
-            else:
-                signed_in = False
-                await route.fulfill(status=200, content_type='application/json', body='{"ok":true}')
-        else:
-            await route.fulfill(status=200, content_type='text/html', body=html)
-    await page.route('http://127.0.0.1:8765/**', handler)
-    html = html.replace('<head>', '<head><base href="http://127.0.0.1:8765/"><script>history.replaceState = () => {};</script>', 1)
-    await page.set_content(html)
-    await page.locator('#password').fill('sample')
-    await page.locator('#login-button').click()
-    await page.locator('button.thread').first.wait_for()
-    await page.locator('button.thread').first.click()
-    assert await page.locator('.response a').inner_text() == 'Open preview'
-    assert await page.locator('.response a').get_attribute('href') == 'https://example.com/demo'
-    await page.locator('.disclosure summary').click()
-    assert await page.locator('.disclosure').evaluate('(e) => e.open')
-    await page.locator('.detail-header').evaluate('(e) => {e.dataset.testSentinel = "persist";}')
-    state['threads'][0]['events'].append({'at': now+3000, 'kind':'tool','label':'Tool: apply_patch'})
-    state['threads'][0]['updated_at'] = 9999999999998
-    await page.locator('#refresh').click()
-    await page.get_by_text('Editing files').first.wait_for()
-    assert await page.locator('.disclosure').evaluate('(e) => e.open'), 'Activity collapsed after refresh'
-    assert await page.locator('.detail-header').get_attribute('data-test-sentinel') == 'persist', 'Thread replaced during refresh'
-    assert await page.locator('.response a').count() == 1
-    await page.screenshot(path=str(SHOT_DIR / 'observer-reviewed-desktop.png'))
-    force_logout_error = True
-    await page.locator('#logout').click()
-    await page.get_by_text("Couldn't sign out. Try again.").wait_for()
-    assert await page.locator('#app-shell').is_visible(), 'Logout failure incorrectly hid dashboard'
-    force_logout_error = False
-    await page.locator('#logout').click()
-    await page.locator('#auth-screen').wait_for(state='visible')
-    assert not errors, errors
-    await page.close()
-
-
-async def main():
-    async with async_playwright() as api:
-        browser = await api.chromium.launch(executable_path=CHROMIUM, headless=True, args=['--no-sandbox', '--disable-dev-shm-usage'])
+def run():
+    if sync_playwright is None:
+        print("Playwright not installed; skipping browser smoke tests")
+        return
+    demo = (ROOT / "dashboard-preview.html").read_text()
+    live = (ROOT / "site.html").read_text()
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
         try:
-            await preview_checks(browser)
-            await hosted_checks(browser)
-            print('Browser checks passed: mobile navigation, URLs, refresh stability, logout errors, overflow')
-        finally:
-            await browser.close()
+            for width, height in [(1280, 850), (390, 844)]:
+                page = browser.new_page(viewport={"width":width, "height":height})
+                errors = []
+                page.on("pageerror", lambda error: errors.append(str(error)))
+                page.set_content(demo, wait_until="load")
+                page.locator(".activity").first.wait_for()
+                assert page.locator(".project").count() == 2
+                assert page.locator(".activity").count() == 5
+                assert page.locator("#heading").inner_text() == "Projects"
+                assert page.locator("#running").inner_text() == "1"
+                assert page.locator("body").evaluate(
+                    "(e) => getComputedStyle(e).backgroundColor") == "rgb(250, 250, 248)"
+                assert not page.evaluate(
+                    "document.documentElement.scrollWidth > window.innerWidth")
+                page.locator(".activity").first.click()
+                assert page.locator('[role="dialog"]').is_visible()
+                page.keyboard.press("Escape")
+                assert page.locator("#overlay").is_hidden()
+                page.locator('[data-tab="activity"]').click()
+                assert page.locator(".project").count() == 1
+                page.locator("#search").fill("npm")
+                assert page.locator(".activity").count() == 1
+                assert not errors, errors
+                page.close()
 
-if __name__ == '__main__':
-    if not async_playwright or not CHROMIUM:
-        print('Playwright or Chromium unavailable; skipping browser tests')
-    else:
-        asyncio.run(main())
+            state = {
+                "devices":[{"id":"mac-test", "last_seen_at":9999999999999}],
+                "threads":[
+                    {"id":"parent-123456", "project":"website", "title":"Build UI",
+                     "source":"Codex", "status":"working", "updated_at":1792195200000},
+                    {"id":"child-123456", "project":"website", "title":"Subagent task",
+                     "source":"Codex", "parent_id":"parent-123456", "agent_label":"Layout",
+                     "status":"completed", "updated_at":1792195200000},
+                    {"id":"review-123456", "project":"website", "title":"Guardian review",
+                     "source":"Codex", "status":"completed", "updated_at":1792195200000},
+                    {"id":"job-123456", "project":"website", "title":"Unit tests",
+                     "source":"Terminal", "status":"failed", "updated_at":1792195200000},
+                ],
+            }
+            mock = """<script>
+window.__loggedIn = false;
+window.fetch = async (url, opts = {}) => {
+  const route = String(url);
+  if(route === '/api/login') {
+    window.__loggedIn = JSON.parse(opts.body || '{}').password === 'demo-secret';
+    return new Response('{}', {status:window.__loggedIn ? 200 : 401});
+  }
+  if(route === '/api/logout') {
+    window.__loggedIn = false;
+    return new Response('{}',{status:200});
+  }
+  if(route === '/api/state') {
+    return new Response(window.__loggedIn ? JSON.stringify(window.__state) : '{}',
+      {status:window.__loggedIn ? 200 : 401});
+  }
+  return new Response('{}',{status:404});
+};
+window.__state = __STATE__;
+</script>""".replace("__STATE__", json.dumps(state))
+            html = live.replace('<script nonce="__NONCE__">',
+                                mock + '<script nonce="__NONCE__">', 1)
+            page = browser.new_page(viewport={"width":1120,"height":840})
+            errors = []
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.set_content(html, wait_until="load")
+            page.locator("#login").wait_for(state="visible")
+            page.locator("#password").fill("demo-secret")
+            page.locator("#login-button").click()
+            page.locator("#app").wait_for(state="visible")
+            assert page.locator(".activity").count() == 2  # subagents and Guardian hidden
+            page.locator(".activity").first.click()
+            page.get_by_text("Subagents", exact=True).wait_for()
+            page.locator(".subtask").first.click()
+            assert page.locator("#dialog-title").inner_text() == "Subagent task"
+            page.locator(".back-link").click()
+            assert page.locator("#dialog-title").inner_text() == "Build UI"
+            page.keyboard.press("Escape")
+            page.locator("#logout").click()
+            page.locator("#login").wait_for(state="visible")
+            assert page.locator("#app").is_hidden()
+            assert not errors, errors
+            page.close()
+        finally:
+            browser.close()
+    print("Browser checks passed for demo, mobile, auth, projects and subagents")
+
+
+if __name__ == "__main__":
+    run()
