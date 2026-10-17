@@ -42,6 +42,10 @@ class FrontendTests(unittest.TestCase):
         self.assertIn('prefers-reduced-motion:reduce', self.site)
         self.assertIn('aria-label="Search threads"', self.site)
         self.assertIn('id="source-filter"', self.site)
+        self.assertIn('class="conv-tools"', self.site)
+        self.assertIn('function renderConversation(thread)', self.site)
+        self.assertIn('appendConversationText(body, entry.text)', self.site)
+        self.assertNotIn('innerHTML', self.site)
         self.assertIn("window.addEventListener('popstate'", self.site)
 
     def test_no_clutter_or_external_dependencies(self):
