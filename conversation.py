@@ -82,6 +82,14 @@ def tool_label(name: str, args: object) -> tuple[str, str]:
         files = re.findall(r"(?:\*\*\* (?:Update|Add|Delete) File:|(?:\+\+\+|---) b/)\s*([^\r\n]+)", patch)
         if files:
             path = ", ".join(files[:3])
+    if name.endswith("functions.exec") or short in ("exec_js", "javascript", "js"):
+        code = args.get("code") or args.get("source") or ""
+        if isinstance(code, str):
+            calls = re.findall(r"tools\.(?:mcp__)?([A-Za-z0-9_]+)", code)
+            if calls:
+                return ("Used " + clip(", ".join(dict.fromkeys(calls))[:110], 110),
+                        clip(code, 900))
+            return ("Ran JavaScript", clip(code, 900))
     if short in ("exec_command", "shell_command", "bash", "terminal", "run", "exec") or "shell" in short:
         detail = clip(command, 1100)
         return ("Ran " + clip(command, 110) if detail else "Ran a command", detail)
@@ -95,14 +103,6 @@ def tool_label(name: str, args: object) -> tuple[str, str]:
                 clip(pattern or path, 300))
     if short in ("sleep", "wait", "delay", "noop"):
         return ("", "")
-    if short in ("functions.exec", "exec_js", "javascript", "js") or name.endswith("functions.exec"):
-        code = args.get("code") or args.get("source") or ""
-        if isinstance(code, str):
-            calls = re.findall(r"tools\.(?:mcp__)?([A-Za-z0-9_]+)", code)
-            if calls:
-                return ("Used " + clip(", ".join(dict.fromkeys(calls))[:110], 110),
-                        clip(code, 900))
-            return ("Ran JavaScript", clip(code, 900))
     if name.startswith("mcp__"):
         parts = name.split("__")
         if len(parts) >= 3:
