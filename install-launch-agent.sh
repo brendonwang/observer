@@ -8,7 +8,7 @@ if [ ! -f "$CONFIG" ]; then
   echo 'First configure Observer with node bin/observer.js setup or python3 agent.py init.' >&2
   exit 2
 fi
-if [ ! -f "$HERE/agent.py" ] || [ ! -f "$HERE/service_adapter.py" ]; then
+if [ ! -f "$HERE/agent.py" ] || [ ! -f "$HERE/conversation.py" ] || [ ! -f "$HERE/service_adapter.py" ]; then
   echo 'Observer agent source is missing. Use node bin/observer.js start.' >&2
   exit 2
 fi
@@ -19,8 +19,8 @@ PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 RUNTIME="$HOME/.observer/runtime"
 mkdir -p "$RUNTIME" "$HOME/Library/LaunchAgents"
 chmod 700 "$RUNTIME"
-cp "$HERE/agent.py" "$HERE/service_adapter.py" "$RUNTIME/"
-chmod 600 "$RUNTIME/agent.py" "$RUNTIME/service_adapter.py"
+cp "$HERE/agent.py" "$HERE/conversation.py" "$HERE/service_adapter.py" "$RUNTIME/"
+chmod 600 "$RUNTIME/agent.py" "$RUNTIME/conversation.py" "$RUNTIME/service_adapter.py"
 ESCAPED_PYTHON=$("$PYTHON" -c 'import html,sys; print(html.escape(sys.argv[1]))' "$PYTHON")
 ESCAPED_AGENT=$("$PYTHON" -c 'import html,sys; print(html.escape(sys.argv[1]))' "$RUNTIME/agent.py")
 ESCAPED_LOG=$("$PYTHON" -c 'import html,sys; print(html.escape(sys.argv[1]))' "$HOME/.observer/agent.log")
