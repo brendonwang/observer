@@ -352,8 +352,18 @@ def claude_text(message: dict) -> str:
 
 def parse_claude_session(path: Path, content_mode: str = "metadata") -> dict | None:
     match = UUID_PATTERN.fullmatch(path.stem)
-    if not match:
-        return None  # Skip sidecars and subagent traces.
+    child = path.stem.startswith("agent-") and path.parent.name == "subagents"
+    if not match and not child:
+        return None
+    agent_key = path.stem[6:] if child else ""
+    if child and not re.fullmatch(r"[A-Za-z0-9_-]{3,100}", agent_key):
+        return None
+    sidecar = small_json(path.with_suffix(".meta.json")) if child else {}
+    parent_id = ("claude-" + path.parent.parent.name.lower()
+                 if child and UUID_PATTERN.fullmatch(path.parent.parent.name)
+                 else "")
+    if child and not parent_id and isinstance(sidecar.get("parentSessionId"), str) and UUID_PATTERN.fullmatch(sidecar["parentSessionId"]):
+        parent_id = "claude-" + sidecar["parentSessionId"].lower()
     events = []
     project = "Unknown project"
     title = ""
@@ -425,10 +435,12 @@ def parse_claude_session(path: Path, content_mode: str = "metadata") -> dict | N
     if not events:
         events.append({"at": last_ms, "kind": "info", "label": "Session discovered"})
     return {
-        "id": "claude-" + match.group().lower(),
-        "title": title or (project if project != "Unknown project" else "Claude Code session"),
+        "id": ("claude-sub-" + hashlib.sha256(str(path).encode()).hexdigest()[:24]) if child else "claude-" + match.group().lower(),
+        "title": (cleaned(sidecar.get("name"), 110) or ("Subagent " + agent_key[:12])) if child else (title or (project if project != "Unknown project" else "Claude Code session")),
         "project": project,
         "source": "Claude Code",
+        "parent_id": parent_id,
+        "agent_label": cleaned(sidecar.get("name"), 65) or "Subagent" if child else "",
         "status": status,
         "updated_at": last_ms,
         "started_at": first_ms or last_ms,
@@ -441,12 +453,104 @@ def parse_claude_session(path: Path, content_mode: str = "metadata") -> dict | N
 def gather_claude_sessions(root: Path = CLAUDE_PATH, max_sessions: int = 20,
                            content_mode: str = "metadata") -> list[dict]:
     result = []
-    for path in source_files(root, "*.jsonl", max_sessions * 3):
+    for path in source_files(root, "*.jsonl", max_sessions * 6):
         item = parse_claude_session(path, content_mode)
         if item:
             result.append(item)
         if len(result) >= max_sessions:
             break
+    return result
+
+
+
+def parse_pi_session(path: Path, content_mode: str = "metadata") -> dict | None:
+    header = first_record(path)
+    if header.get("type") != "session":
+        return None
+    raw_id = header.get("id")
+    if not isinstance(raw_id, str) or not ID_PATTERN.fullmatch(raw_id):
+        return None
+    parent_path = header.get("parentSession")
+    parent_id = ""
+    if isinstance(parent_path, str):
+        parent_header = first_record(Path(parent_path).expanduser())
+        parent_raw = parent_header.get("id")
+        if isinstance(parent_raw, str) and ID_PATTERN.fullmatch(parent_raw) and parent_raw != raw_id:
+            parent_id = "pi-" + parent_raw
+    cwd = header.get("cwd")
+    project = cleaned(Path(cwd).name, 80) if isinstance(cwd, str) and cwd else "Unknown project"
+    title = ""
+    status = "unknown"
+    last_ms = 0
+    first_ms = event_timestamp(header) or 0
+    candidate = ""
+    final = ""
+    events = []
+    for entry in read_tail_records(path):
+        at = event_timestamp(entry)
+        last_ms = max(last_ms, at or 0)
+        if entry.get("type") != "message":
+            continue
+        message = entry.get("message")
+        if not isinstance(message, dict):
+            continue
+        role = message.get("role")
+        if role == "user":
+            status = "working"
+            candidate = final = ""
+            events.append({"at": at, "kind": "start", "label": "Turn started"})
+        elif role == "assistant":
+            content = message.get("content")
+            if isinstance(content, list):
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    if block.get("type") == "toolCall":
+                        events.append({"at": at, "kind": "tool", "label": "Tool: " + cleaned(block.get("name"), 55)})
+                text = cleaned("\n".join(
+                    block["text"] for block in content
+                    if isinstance(block, dict) and block.get("type") == "text"
+                    and isinstance(block.get("text"), str)
+                ), 8000)
+                if text:
+                    candidate = text
+                    events.append({"at": at, "kind": "message", "label": "Assistant responded"})
+            stop = message.get("stopReason")
+            if stop in ("stop", "end_turn"):
+                status = "completed"
+                final = candidate
+                events.append({"at": at, "kind": "complete", "label": "Turn completed"})
+            elif stop in ("error", "aborted"):
+                status = "interrupted"
+    try:
+        last_ms = max(last_ms, int(path.stat().st_mtime * 1000))
+    except OSError:
+        return None
+    if status == "working" and int(time.time() * 1000) - last_ms > 180_000:
+        status = "quiet"
+    if not events:
+        events.append({"at": last_ms, "kind": "info", "label": "Session discovered"})
+    return {
+        "id": "pi-" + raw_id,
+        "source": "Pi",
+        "title": title or (project if project != "Unknown project" else "Pi session"),
+        "project": project,
+        "parent_id": parent_id,
+        "agent_label": "Fork" if parent_id else "",
+        "status": status,
+        "updated_at": last_ms, "started_at": first_ms or last_ms,
+        "events": events[-KEEP_EVENTS:], "has_preview": False,
+        "final_response": final[:6000] if content_mode == "final" else "",
+    }
+
+
+def gather_pi_sessions(root: Path = PI_PATH, max_sessions: int = 20,
+                       content_mode: str = "metadata") -> list[dict]:
+    result = []
+    for path in source_files(root, "*.jsonl", max_sessions * 4):
+        item = parse_pi_session(path, content_mode)
+        if item:
+            result.append(item)
     return result
 
 
@@ -530,6 +634,9 @@ def configured_sessions(cfg: dict, sessions_root: Path = SESSIONS_PATH,
         elif kind == "claude":
             root = Path(source.get("path", CLAUDE_PATH)) if isinstance(source, dict) else CLAUDE_PATH
             result.extend(gather_claude_sessions(root.expanduser(), max_sessions, mode))
+        elif kind == "pi":
+            root = Path(source.get("path", PI_PATH)) if isinstance(source, dict) else PI_PATH
+            result.extend(gather_pi_sessions(root.expanduser(), max_sessions, mode))
         elif kind == "files":
             root = Path(source.get("path", FEEDS_PATH)) if isinstance(source, dict) else FEEDS_PATH
             result.extend(gather_feeds(root.expanduser(), max_sessions, mode))
@@ -610,10 +717,10 @@ def interactive_init(path: Path = CONFIG_PATH) -> None:
     token = getpass.getpass("Agent token (Cloudflare AGENT_TOKEN secret): ").strip()
     if len(token) < 30:
         raise ValueError("Use a randomly generated agent token of at least 30 characters")
-    choices = input("Sources [codex,claude,files] (default: codex,files): ").lower().strip() or "codex,files"
+    choices = input("Sources [codex,claude,pi,files] (default: codex,files): ").lower().strip() or "codex,files"
     types = [part.strip() for part in choices.split(",")]
-    if len(types) != len(set(types)) or not types or any(part not in ("codex", "claude", "files") for part in types):
-        raise ValueError("Choose comma-separated sources from codex,claude,files")
+    if len(types) != len(set(types)) or not types or any(part not in ("codex", "claude", "pi", "files") for part in types):
+        raise ValueError("Choose comma-separated sources from codex,claude,pi,files")
     choice = input("Share completed responses with Cloudflare? [y/N]: ").lower().strip()
     preview_dir = input("Optional approved screenshots folder (blank to disable): ").strip()
     if preview_dir:
@@ -654,12 +761,12 @@ def read_config(path: Path = CONFIG_PATH) -> dict:
         raise ValueError("Invalid content_mode")
     sources = cfg.get("sources")
     if sources is not None:
-        if not isinstance(sources, list) or not sources or len(sources) > 3:
+        if not isinstance(sources, list) or not sources or len(sources) > 4:
             raise ValueError("Invalid sources")
         kinds = []
         for source in sources:
             kind = source.get("type") if isinstance(source, dict) else source
-            if kind not in ("codex", "claude", "files") or kind in kinds:
+            if kind not in ("codex", "claude", "pi", "files") or kind in kinds:
                 raise ValueError("Unknown or duplicate source")
             if isinstance(source, dict):
                 for key in ("path", "index"):
