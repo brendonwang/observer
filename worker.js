@@ -268,20 +268,20 @@ export default {
     const path = new URL(request.url).pathname;
     if (!env.DB || !env.AGENT_TOKEN || !env.VIEW_PASSWORD || !env.SESSION_KEY) return fail('Server is missing its required configuration',503);
     try {
-      if (path==='/' && request.method==='GET') return page();
+      if (path==='/' && request.method==='GET') return await page();
       if (path==='/api/agent/sync' && request.method==='POST') {
         if (!(await agentAuthorized(request,env))) return fail('Unauthorized',401);
-        return sync(request,env);
+        return await sync(request,env);
       }
       if (path==='/api/agent/preview' && request.method==='POST') {
         if (!(await agentAuthorized(request,env))) return fail('Unauthorized',401);
-        return uploadPreview(request,env);
+        return await uploadPreview(request,env);
       }
-      if (path==='/api/login' && request.method==='POST') return login(request,env);
+      if (path==='/api/login' && request.method==='POST') return await login(request,env);
       if (path.startsWith('/api/')) {
         if (!(await authorized(request,env))) return fail('Unauthorized',401);
-        if (path==='/api/state' && request.method==='GET') return state(env);
-        if (path==='/api/preview' && request.method==='GET') return preview(request,env);
+        if (path==='/api/state' && request.method==='GET') return await state(env);
+        if (path==='/api/preview' && request.method==='GET') return await preview(request,env);
         if (path==='/api/logout' && request.method==='POST') {
           if (!csrfOK(request)) return fail('Invalid request origin',403);
           return json({ok:true},200,{'Set-Cookie':'observer_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0'});
