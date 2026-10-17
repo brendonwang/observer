@@ -22,6 +22,7 @@ import urllib.request
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from service_adapter import gather_services
 
 CONFIG_PATH = Path.home() / ".observer" / "config.json"
 LEGACY_CONFIG_PATH = Path.home() / ".codex-monitor" / "config.json"
@@ -30,7 +31,7 @@ INDEX_PATH = Path.home() / ".codex" / "session_index.jsonl"
 CLAUDE_PATH = Path.home() / ".claude" / "projects"
 PI_PATH = Path.home() / ".pi" / "agent" / "sessions"
 FEEDS_PATH = Path.home() / ".observer" / "feeds"
-STATUSES = {"working", "completed", "quiet", "interrupted", "unknown"}
+STATUSES = {"working", "completed", "quiet", "interrupted", "failed", "unknown"}
 EVENT_KINDS = {"start", "complete", "warning", "tool", "message", "thought", "info"}
 UUID_PATTERN = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 
@@ -637,6 +638,9 @@ def configured_sessions(cfg: dict, sessions_root: Path = SESSIONS_PATH,
         elif kind == "pi":
             root = Path(source.get("path", PI_PATH)) if isinstance(source, dict) else PI_PATH
             result.extend(gather_pi_sessions(root.expanduser(), max_sessions, mode))
+        elif kind == "services":
+            config = Path(source.get("path", str(Path.home() / ".observer" / "services.json"))) if isinstance(source, dict) else Path.home() / ".observer" / "services.json"
+            result.extend(gather_services(config=config, content_mode=mode))
         elif kind == "files":
             root = Path(source.get("path", FEEDS_PATH)) if isinstance(source, dict) else FEEDS_PATH
             result.extend(gather_feeds(root.expanduser(), max_sessions, mode))
@@ -717,10 +721,10 @@ def interactive_init(path: Path = CONFIG_PATH) -> None:
     token = getpass.getpass("Agent token (Cloudflare AGENT_TOKEN secret): ").strip()
     if len(token) < 30:
         raise ValueError("Use a randomly generated agent token of at least 30 characters")
-    choices = input("Sources [codex,claude,pi,files] (default: codex,files): ").lower().strip() or "codex,files"
+    choices = input("Sources [codex,claude,pi,files,services] (default: codex,files,services): ").lower().strip() or "codex,files,services"
     types = [part.strip() for part in choices.split(",")]
-    if len(types) != len(set(types)) or not types or any(part not in ("codex", "claude", "pi", "files") for part in types):
-        raise ValueError("Choose comma-separated sources from codex,claude,pi,files")
+    if len(types) != len(set(types)) or not types or any(part not in ("codex", "claude", "pi", "files", "services") for part in types):
+        raise ValueError("Choose comma-separated sources from codex,claude,pi,files,services")
     choice = input("Share completed responses with Cloudflare? [y/N]: ").lower().strip()
     preview_dir = input("Optional approved screenshots folder (blank to disable): ").strip()
     if preview_dir:
@@ -761,12 +765,12 @@ def read_config(path: Path = CONFIG_PATH) -> dict:
         raise ValueError("Invalid content_mode")
     sources = cfg.get("sources")
     if sources is not None:
-        if not isinstance(sources, list) or not sources or len(sources) > 4:
+        if not isinstance(sources, list) or not sources or len(sources) > 5:
             raise ValueError("Invalid sources")
         kinds = []
         for source in sources:
             kind = source.get("type") if isinstance(source, dict) else source
-            if kind not in ("codex", "claude", "pi", "files") or kind in kinds:
+            if kind not in ("codex", "claude", "pi", "files", "services") or kind in kinds:
                 raise ValueError("Unknown or duplicate source")
             if isinstance(source, dict):
                 for key in ("path", "index"):
