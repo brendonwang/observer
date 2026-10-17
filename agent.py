@@ -601,6 +601,7 @@ def parse_feed_snapshot(path: Path, root: Path, content_mode: str = "metadata") 
         "title": cleaned(obj.get("title"), 110) or external_id,
         "project": cleaned(obj.get("project"), 80) or "Unknown project",
         "source": cleaned(obj.get("source"), 40) or "Custom",
+        "type": cleaned(obj.get("type"), 32) or "activity",
         "status": status, "updated_at": int(updated), "started_at": int(started),
         "events": events, "has_preview": False,
         "final_response": cleaned(obj.get("final_response"), 6000) if content_mode == "final" and status == "completed" else "",
