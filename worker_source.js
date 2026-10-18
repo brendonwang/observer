@@ -7,7 +7,7 @@
 const HTML = __EMBEDDED_SITE_HTML__;
 const SESSION_AGE_SECONDS = 12 * 60 * 60;
 const ID = /^[A-Za-z0-9_-]{6,100}$/;
-const statuses = new Set(['working', 'completed', 'quiet', 'interrupted', 'unknown']);
+const statuses = new Set(['working', 'completed', 'quiet', 'interrupted', 'failed', 'unknown']);
 const kinds = new Set(['start', 'complete', 'warning', 'tool', 'message', 'thought', 'info']);
 const enc = new TextEncoder();
 const headers = {
@@ -204,6 +204,7 @@ function validateThread(input, now) {
     title: clean(input.title, 110) || 'Untitled activity',
     project: clean(input.project, 80) || 'Unknown project',
     source: clean(input.source, 40) || 'Codex',
+    type: clean(input.type, 32) || 'activity',
     parent_id: ID.test(input.parent_id || '') && input.parent_id !== input.id ? input.parent_id : '',
     agent_label: clean(input.agent_label, 65),
     status,
@@ -299,7 +300,18 @@ async function page() {
   const csp = "default-src 'none'; script-src 'nonce-"+nonce+"'; style-src 'nonce-"+nonce+"'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; object-src 'none'; form-action 'self'; frame-ancestors 'none'";
   return makeResponse(HTML.replaceAll('__NONCE__',nonce),{headers:{'Content-Type':'text/html; charset=utf-8','Content-Security-Policy':csp}});
 }
+async function pruneExpired(env) {
+  const configured = Number(env.RETENTION_DAYS);
+  const days = Number.isFinite(configured) && configured >= 1 && configured <= 365 ? Math.floor(configured) : 30;
+  const cutoff = Date.now() - days * 86_400_000;
+  await env.DB.prepare('DELETE FROM previews WHERE thread_id IN (SELECT id FROM threads WHERE received_at < ?)').bind(cutoff).run();
+  await env.DB.prepare('DELETE FROM threads WHERE received_at < ?').bind(cutoff).run();
+  await env.DB.prepare('DELETE FROM login_attempts WHERE reset_at < ?').bind(Date.now() - 86_400_000).run();
+}
 export default {
+  async scheduled(_event,env,_ctx) {
+    await pruneExpired(env);
+  },
   async fetch(request,env) {
     const path = new URL(request.url).pathname;
     if (!env.DB || !env.AGENT_TOKEN || !env.VIEW_PASSWORD || !env.SESSION_KEY) return fail('Server is missing its required configuration',503);

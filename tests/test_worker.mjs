@@ -35,6 +35,21 @@ class FakeDB {
       if(sql.includes('INSERT INTO threads')){db.threads.set(args[0],{id:args[0],device_id:args[1],title:args[2],project:args[3],status:args[4],updated_at:args[5],received_at:args[6],snapshot:args[7]});return{};}
       if(sql.includes('INSERT INTO previews')){db.previews.set(args[0],{thread_id:args[0],filename:args[1],mime:args[2],image_b64:args[3],updated_at:Date.now()});return{};}
       if(sql.includes('INSERT INTO login_attempts')){const prev=db.attempts.get(args[0]);db.attempts.set(args[0],{attempts:prev&&prev.reset_at>args[2]-900000?prev.attempts+1:1,reset_at:args[2]});return{};}
+      if(sql.startsWith('DELETE FROM previews WHERE thread_id IN')) {
+        for(const [id,preview] of db.previews) {
+          const thread=db.threads.get(id);
+          if(thread && thread.received_at<args[0]) db.previews.delete(id);
+        }
+        return {};
+      }
+      if(sql.startsWith('DELETE FROM threads WHERE received_at')) {
+        for(const [id,thread] of db.threads) if(thread.received_at<args[0]) db.threads.delete(id);
+        return {};
+      }
+      if(sql.startsWith('DELETE FROM login_attempts WHERE reset_at')) {
+        for(const [id,attempt] of db.attempts) if(attempt.reset_at<args[0]) db.attempts.delete(id);
+        return {};
+      }
       if(sql.includes('DELETE FROM login_attempts')){db.attempts.delete(args[0]);return{};}
       throw Error('Unexpected run: '+sql);
     }
@@ -56,7 +71,7 @@ test('HTML root has restrictive CSP; no open data endpoint',async()=>{
   const page=await call('/');
   assert.equal(page.status,200);
   assert.match(page.headers.get('Content-Security-Policy'),/nonce-/);
-  assert.match(await page.text(),/Threads/);
+  assert.match(await page.text(),/Workspace/);
   assert.equal((await call('/api/state')).status,401);
 });
 
@@ -217,4 +232,33 @@ test('authenticated screenshot upload, whitelist and fetch',async()=>{
   assert.deepEqual(Buffer.from(await preview.arrayBuffer()),png);
   const current=await call('/api/state','GET',null,{Cookie:cookie});
   assert.ok((await current.json()).threads[0].preview_updated_at > 0);
+});
+
+test('failed command status and activity type survive ingestion',async()=>{
+  const id='failedjob123456';
+  const payload={protocol:1,device_id:'mac-123456789abc',threads:[{
+    id,title:'Unit tests',project:'observer',source:'Terminal',type:'command',
+    status:'failed',updated_at:Date.now(),events:[],
+  }]};
+  const sent=await call('/api/agent/sync','POST',payload,{Authorization:'Bearer '+env.AGENT_TOKEN});
+  assert.equal(sent.status,200);
+  const logged=await call('/api/login','POST',{password:env.VIEW_PASSWORD},{Origin:origin});
+  const cookie=logged.headers.get('set-cookie').split(';')[0];
+  const current=await call('/api/state','GET',null,{Cookie:cookie});
+  const item=(await current.json()).threads.find(t=>t.id===id);
+  assert.equal(item.status,'failed');
+  assert.equal(item.type,'command');
+});
+
+test('scheduled retention deletes old threads and attached previews',async()=>{
+  const id='olderthread123';
+  env.DB.threads.set(id,{
+    id,device_id:'mac-old',title:'Old session',project:'x',status:'completed',
+    updated_at:Date.now()-40*86400000,received_at:Date.now()-40*86400000,
+    snapshot:JSON.stringify({id,title:'Old session',project:'x',status:'completed'}),
+  });
+  env.DB.previews.set(id,{thread_id:id,mime:'image/png',image_b64:'AA==',updated_at:Date.now()});
+  await worker.scheduled({},env,{});
+  assert.equal(env.DB.threads.has(id),false);
+  assert.equal(env.DB.previews.has(id),false);
 });
